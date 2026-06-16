@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mini Minecraft with TNT Physics</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+    <!-- HUD -->
+    <div id="crosshair"></div>
+    <div id="info">
+        <b>操作方法:</b><br>
+        画面クリック: ゲーム開始<br>
+        マウス: 視点操作<br>
+        WASD: 移動 (W2回: ダッシュ)<br>
+        SPACE: ジャンプ (2回: 飛行)<br>
+        SHIFT: 飛行中下降<br>
+        左クリック: 破壊<br>
+        右クリック: 設置 / 銃発射<br>
+        E: インベントリ<br>
+        Esc: ポーズ<br>
+    </div>
+
+    <div id="fps-counter">FPS: 60</div>
+    <div id="coords-display">X: 0 Y: 0 Z: 0</div>
+    <div id="fly-mode-indicator">FLY MODE</div>
+    <div id="break-indicator"></div>
+
+    <div id="hearts-container"></div>
+
+    <div id="ui-container">
+        <!-- In-game hotbar -->
+    </div>
+
+    <!-- Pause Menu with Settings -->
+    <div id="pause-menu" class="overlay-screen">
+        <h1>PAUSE</h1>
+
+        <div class="settings-panel" id="settings-panel">
+            <label title="TNTで死ななくなります">
+                <input type="checkbox" id="invincible" checked> ダメージ無効 (デフォルトON)
+            </label>
+            <div style="display: flex; flex-direction: column; gap: 5px;">
+                <label for="sensitivity">マウス感度</label>
+                <input type="range" id="sensitivity" min="1" max="20" value="4" style="width: 200px;">
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 5px;">
+                <label for="touch-sensitivity">タッチ視点感度</label>
+                <input type="range" id="touch-sensitivity" min="1" max="20" value="6" style="width: 200px;">
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 5px;">
+                <label for="rocket-power">ロケット威力: <span id="rocket-power-value">5</span></label>
+                <input type="range" id="rocket-power" min="1" max="10" value="5" style="width: 200px;">
+            </div>
+        </div>
+
+        <button id="btn-resume">ゲームに戻る</button>
+        <button id="btn-reset" style="background: #d32f2f; border-color: #b71c1c;">プレイヤーをリセット</button>
+    </div>
+
+    <!-- Inventory Screen -->
+    <div id="inventory-screen" class="overlay-screen" style="justify-content: flex-start; padding-top: 100px;">
+        <h1>INVENTORY</h1>
+        <p>アイテムをクリックして入れ替えられます</p>
+        <div class="inv-grid" id="inv-grid">
+            <!-- Populated by JS -->
+        </div>
+        <button id="btn-close-inv">閉じる (E)</button>
+    </div>
+
+    <div id="game-over" class="overlay-screen">
+        <h1 style="color: #ff5555;">YOU DIED</h1>
+        <button onclick="location.reload()">リスポーン</button>
+    </div>
+
+    <!-- Mobile Touch Controls -->
+    <div id="mobile-controls">
+        <!-- Joystick for movement -->
+        <div id="joystick-zone">
+            <div id="joystick-base">
+                <div id="joystick-stick"></div>
+            </div>
+        </div>
+
+        <!-- Look/Action zone (full screen for camera + tap to interact) -->
+        <div id="look-zone"></div>
+
+        <!-- Action buttons -->
+        <div id="btn-jump" class="touch-btn">JUMP</div>
+        <div id="btn-inventory" class="touch-btn">E</div>
+        <div id="btn-pause" class="touch-btn">II</div>
+
+        <!-- Mobile hint -->
+        <div id="mobile-hint">タップ:設置 / 長押し:破壊 / JUMP2回:飛行</div>
+    </div>
+
+    <!-- Load Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+    <!-- Game modules (load order matters) -->
+    <script src="js/config.js"></script>
+    <script src="js/audio.js"></script>
+    <script src="js/textures.js"></script>
+    <script src="js/scene.js"></script>
+    <script src="js/world.js"></script>
+    <script src="js/physics.js"></script>
+    <script src="js/entities.js"></script>
+    <script src="js/ui.js"></script>
+    <script src="js/player.js"></script>
+    <script src="js/actions.js"></script>
+    <script src="js/input.js"></script>
+    <script src="js/mobile.js"></script>
+    <script src="js/main.js"></script>
+</body>
+</html>
