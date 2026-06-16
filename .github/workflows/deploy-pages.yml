@@ -1,0 +1,46 @@
+name: Deploy to GitHub Pages
+
+# index.html / css / js をそのまま GitHub Pages に公開するワークフロー
+on:
+  push:
+    branches:
+      - main
+      - claude/game-bug-check-refactor-po14h4
+  workflow_dispatch:
+
+# GITHUB_TOKEN に Pages デプロイ権限を付与
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 同時実行を1つに制限（古いデプロイはキャンセル）
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+        with:
+          # Pages がまだ有効化されていなければ自動で有効化する
+          enablement: true
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          # リポジトリ全体（ルートの index.html を含む）を公開
+          path: .
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
