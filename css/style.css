@@ -227,8 +227,8 @@ input[type=range] {
 /* Joystick */
 #joystick-zone {
     position: absolute;
-    bottom: 30px;
-    left: 30px;
+    bottom: calc(30px + env(safe-area-inset-bottom, 0px));
+    left: calc(30px + env(safe-area-inset-left, 0px));
     width: 140px;
     height: 140px;
     pointer-events: auto;
@@ -293,22 +293,22 @@ input[type=range] {
 }
 
 #btn-jump {
-    bottom: 30px;
-    right: 30px;
+    bottom: calc(30px + env(safe-area-inset-bottom, 0px));
+    right: calc(30px + env(safe-area-inset-right, 0px));
     width: 80px;
     height: 80px;
     font-size: 14px;
 }
 #btn-inventory {
-    top: 10px;
-    right: 10px;
+    top: calc(10px + env(safe-area-inset-top, 0px));
+    right: calc(10px + env(safe-area-inset-right, 0px));
     width: 50px;
     height: 50px;
     font-size: 20px;
 }
 #btn-pause {
-    top: 10px;
-    right: 70px;
+    top: calc(10px + env(safe-area-inset-top, 0px));
+    right: calc(70px + env(safe-area-inset-right, 0px));
     width: 50px;
     height: 50px;
     font-size: 20px;
@@ -323,9 +323,12 @@ input[type=range] {
         display: none;
     }
     #ui-container {
-        bottom: 5px;
+        bottom: calc(5px + env(safe-area-inset-bottom, 0px));
         gap: 3px;
         padding: 5px;
+        max-width: calc(100vw - 24px);
+        flex-wrap: wrap;
+        justify-content: center;
     }
     .slot {
         width: 36px;
@@ -333,24 +336,32 @@ input[type=range] {
         pointer-events: auto;
     }
     #hearts-container {
-        bottom: 55px;
+        bottom: calc(55px + env(safe-area-inset-bottom, 0px));
+    }
+    /* HUDテキストは左上に縦並び（左下のジョイスティックと重ならないように） */
+    #coords-display {
+        left: calc(10px + env(safe-area-inset-left, 0px));
+        top: calc(10px + env(safe-area-inset-top, 0px));
+        bottom: auto;
     }
     #fps-counter {
-        left: 10px;
-        top: auto;
-        bottom: 10px;
-    }
-    #coords-display {
-        left: 10px;
-        top: 10px;
+        left: calc(10px + env(safe-area-inset-left, 0px));
+        top: calc(40px + env(safe-area-inset-top, 0px));
+        bottom: auto;
     }
     #fly-mode-indicator {
-        left: 100px;
-        top: auto;
-        bottom: 10px;
+        left: calc(10px + env(safe-area-inset-left, 0px));
+        top: calc(70px + env(safe-area-inset-top, 0px));
+        bottom: auto;
     }
     #crosshair {
         display: none; /* モバイルでは十字を非表示 */
+    }
+    #mobile-hint {
+        top: calc(70px + env(safe-area-inset-top, 0px));
+        max-width: calc(100vw - 32px);
+        white-space: normal;
+        text-align: center;
     }
 }
 
