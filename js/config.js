@@ -10,6 +10,9 @@ const JUMP_FORCE = 8.0;
 const FAST_PLACE_DELAY = 100; // Moving
 const SLOW_PLACE_DELAY = 250; // Standing still
 const BREAK_DELAY = 250;
+// 自由飛行中に「下向き」に掘るときの採掘クールダウン（小さいほど速い）。
+// 上向き/通常は BREAK_DELAY のまま。将来上向きも速くしたくなったら FLY_DIG_UP_DELAY を足す。
+const FLY_DIG_DOWN_DELAY = 80;
 const LAUNCHER_DELAY = 200; // Fire rate for TNT gun
 
 const WALK_SPEED = 50.0;

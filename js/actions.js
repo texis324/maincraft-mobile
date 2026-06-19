@@ -43,6 +43,19 @@ function togglePause() {
 }
 
 // --- Mine / Place / Ignite ---
+
+// 採掘クールダウン（小さいほど速い）。自由飛行中に下向きへ掘る時だけ速くする。
+// 将来、上向きの速度も変えたくなったらここに分岐を足すだけ（FLY_DIG_UP_DELAY）。
+const _digDirTmp = new THREE.Vector3();
+function getBreakDelay() {
+    if (controls.isFlying) {
+        camera.getWorldDirection(_digDirTmp);
+        if (_digDirTmp.y < -0.5) return FLY_DIG_DOWN_DELAY; // 視線が下向き＝下掘り＝速い
+        // 上向きを速くする時: if (_digDirTmp.y > 0.5) return FLY_DIG_UP_DELAY;
+    }
+    return BREAK_DELAY;
+}
+
 function attemptMine(screenX, screenY) {
     // スクリーン座標が指定されていればそこを、なければ画面中央を使用
     let raycastCoords = new THREE.Vector2(0, 0);

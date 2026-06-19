@@ -375,7 +375,7 @@ function checkTouchActions() {
     const time = performance.now();
 
     // 長押し中の破壊（タッチ座標を使用）
-    if (touchBreakActive && time - lastActionTime > BREAK_DELAY) {
+    if (touchBreakActive && time - lastActionTime > getBreakDelay()) {
         attemptMine(screenTouchX, screenTouchY);
         lastActionTime = time;
     }

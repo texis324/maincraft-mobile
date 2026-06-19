@@ -245,7 +245,7 @@ document.addEventListener('mousedown', (event) => {
     if (event.button === 0) {
         // 左クリック: 破壊
         isLeftMouseDown = true;
-        if (performance.now() - lastActionTime > BREAK_DELAY) {
+        if (performance.now() - lastActionTime > getBreakDelay()) {
             attemptMine();
             lastActionTime = performance.now();
         }

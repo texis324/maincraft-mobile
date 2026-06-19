@@ -50,7 +50,7 @@ function animate() {
     }
 
     // Game Logic
-    if (isLeftMouseDown && time - lastActionTime > BREAK_DELAY) {
+    if (isLeftMouseDown && time - lastActionTime > getBreakDelay()) {
         attemptMine();
         lastActionTime = time;
     }
