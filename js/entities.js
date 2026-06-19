@@ -436,6 +436,34 @@ function explode(cx, cy, cz, isMega = false, customRadius = null, bombKind = nul
     // 掘り出した土砂が環状に積もる「縁の盛り上がり(リップ)」を再現（地表核爆発のみ・同じ affected に積む）
     if (isBomb) buildCraterRim(cx, cy, cz, R, affected);
 
+    // 爆風なぎ倒し: クレーター外周の環状帯で、地表より上の構造物(村/木/建造物)を距離減衰で撤去（live・原爆/水爆のみ）。
+    // 永続は爆発イベントが再生成時に再現（applyExplosionEventsToChunk）。ここは即時の見た目用。
+    if (isBomb) {
+        const fr1 = R * FLATTEN_R1, fr02 = (R * FLATTEN_R0) ** 2, fr12 = fr1 * fr1;
+        const fx0 = Math.floor(cx - fr1), fx1 = Math.ceil(cx + fr1);
+        const fz0 = Math.floor(cz - fr1), fz1 = Math.ceil(cz + fr1);
+        for (let x = fx0; x <= fx1; x++) {
+            const dx = x - cx, dx2 = dx * dx;
+            for (let z = fz0; z <= fz1; z++) {
+                const dz = z - cz, r2 = dx2 + dz * dz;
+                if (r2 < fr02 || r2 > fr12) continue;
+                const surf = terrainHeightAt(x, z);
+                // surf+1..surf+h を走査して固体を撤去（中空の家の屋根も漏らさない＝再生成側と同一ロジック）。
+                const yhi = surf + blastFlattenHeight(Math.sqrt(r2), R);
+                for (let y = surf + 1; y <= yhi; y++) {
+                    const t = getBlock(x, y, z);
+                    if (!t || t === BLOCKS.BEDROCK) continue;
+                    const ck = chunkOf(x, y, z);
+                    setBlockData(x, y, z, 0);
+                    const ed = editsByChunk[ck];
+                    if (ed) { const k = getKey(x, y, z); if (k in ed) delete ed[k]; } // 設置物を倒した時の復活防止
+                    affected.add(ck);
+                }
+            }
+        }
+        _invalidateGetCache();
+    }
+
     // 影響チャンク＋近傍をまとめて dirty 化。無予算 flush はしない＝animate が数フレームで消化して
     // フリーズを回避（クレーターは爆発演出=フラッシュ/画面揺れの間に数フレームで完成する）。
     for (const ck of affected) {
@@ -460,6 +488,15 @@ function explode(cx, cy, cz, isMega = false, customRadius = null, bombKind = nul
     }
 
     const distToPlayer = camera.position.distanceTo(new THREE.Vector3(cx, cy, cz));
+
+    // ☢ 被爆量（目安）：原爆/水爆だけ放射性。爆風被害より広く届き、近いほど・威力が大きいほど多い。
+    // 通常TNTは非放射性なので増えない。リセットしない一生モノのカウンタ＝「どれだけ被爆したか」が笑える。
+    if (isBomb && distToPlayer < radius * 2.5) {
+        radiationDose += (radius * radius * 3) / (distToPlayer + 1); // 至近の水爆で致死量(数千mSv)級
+        // 被爆量はスライダー操作では変わらないので、ここで永続化をトリガー（自己テスト中は汚さない）
+        if (!window.__selfTesting && typeof saveSettings === 'function') saveSettings();
+    }
+
     // MEGA/原爆/水爆はより広い範囲・大ダメージ・大ノックバック
     // （原爆/水爆は即死級。ただしポーズメニューの「ダメージ無効」ONなら死なない）
     const damageRadius = isBomb ? radius * 1.3 : (isMega ? radius * 2.5 : radius * 2);

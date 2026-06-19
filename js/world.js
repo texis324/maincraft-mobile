@@ -32,6 +32,16 @@ function recordExplosionEvent(cx, cy, cz, R, isBomb) {
 }
 // 1チャンクに、重なる全爆発イベントを再カーブで適用（generateChunk から block-edit より前に呼ぶ）。
 // explode の掘削と同じ「下半分=お椀/それ以外=真球」「岩盤は残す」を局所インデックスで再現。
+// 爆風なぎ倒しの「地表より上を撤去する高さ」。クレーター外周の環状帯[1.35R,2.0R]で内端→外端に減衰。
+// live と再生成で同じ式＝リロードしても同じ倒れ方になる（決定的）。
+const FLATTEN_R0 = 1.35, FLATTEN_R1 = 2.0;
+function blastFlattenHeight(r, R) {
+    const fr0 = R * FLATTEN_R0, fr1 = R * FLATTEN_R1;
+    if (r < fr0 || r > fr1) return 0;
+    const tt = 1 - (r - fr0) / (fr1 - fr0);          // 内端1→外端0
+    return Math.max(1, Math.round(Math.min(16, R * 0.3) * tt));
+}
+
 function applyExplosionEventsToChunk(ch) {
     if (explosionEvents.length === 0) return;
     const bx0 = ch.cx * CS, by0 = ch.cy * CS, bz0 = ch.cz * CS;
@@ -40,26 +50,52 @@ function applyExplosionEventsToChunk(ch) {
     for (let i = 0; i < explosionEvents.length; i++) {
         const ev = explosionEvents[i];
         const R = ev.R, R2 = R * R;
-        if (ev.cx + R < bx0 || ev.cx - R > bx1 || ev.cz + R < bz0 || ev.cz - R > bz1) continue; // bbox早期棄却
+        const fr1 = R * FLATTEN_R1;                    // 影響最大半径（なぎ倒し含む）
+        if (ev.cx + fr1 < bx0 || ev.cx - fr1 > bx1 || ev.cz + fr1 < bz0 || ev.cz - fr1 > bz1) continue;
+
+        // --- クレーター（お椀状に掘る・このchunkのY範囲に掛かる時だけ） ---
         const Rv2 = (R * (ev.isBomb ? 0.4 : 1.0)) ** 2;
         const bottomY = Math.max(worldBottomY + 1, Math.floor(ev.cy) - Math.min(R, 30));
-        if (ev.cy + R < by0 || bottomY > by1) continue;
-        const lx0 = Math.max(0, Math.ceil(ev.cx - R) - bx0), lx1 = Math.min(CS - 1, Math.floor(ev.cx + R) - bx0);
-        const lyLo = Math.max(bottomY, Math.ceil(ev.cy - R));
-        const ly0 = Math.max(0, lyLo - by0), ly1 = Math.min(CS - 1, Math.floor(ev.cy + R) - by0);
-        for (let lx = lx0; lx <= lx1; lx++) {
-            const dx = (bx0 + lx) - ev.cx, dx2 = dx * dx;
-            if (dx2 > R2) continue;
-            for (let ly = ly0; ly <= ly1; ly++) {
-                const dy = (by0 + ly) - ev.cy;
-                const maxDz2 = (ev.isBomb && dy < 0) ? R2 * (1 - (dy * dy) / Rv2) - dx2 : R2 - dx2 - dy * dy;
-                if (maxDz2 < 0) continue;
-                const dzMax = Math.sqrt(maxDz2);
-                const wzlo = Math.max(bz0, Math.ceil(ev.cz - dzMax)), wzhi = Math.min(bz1, Math.floor(ev.cz + dzMax));
-                for (let wz = wzlo; wz <= wzhi; wz++) {
-                    const idx = (ly * CS + (wz - bz0)) * CS + lx;
-                    const t = data[idx];
-                    if (t && t !== BLOCKS.BEDROCK) data[idx] = 0; // 岩盤は残す
+        if (!(ev.cy + R < by0 || bottomY > by1)) {
+            const lx0 = Math.max(0, Math.ceil(ev.cx - R) - bx0), lx1 = Math.min(CS - 1, Math.floor(ev.cx + R) - bx0);
+            const lyLo = Math.max(bottomY, Math.ceil(ev.cy - R));
+            const ly0 = Math.max(0, lyLo - by0), ly1 = Math.min(CS - 1, Math.floor(ev.cy + R) - by0);
+            for (let lx = lx0; lx <= lx1; lx++) {
+                const dx = (bx0 + lx) - ev.cx, dx2 = dx * dx;
+                if (dx2 > R2) continue;
+                for (let ly = ly0; ly <= ly1; ly++) {
+                    const dy = (by0 + ly) - ev.cy;
+                    const maxDz2 = (ev.isBomb && dy < 0) ? R2 * (1 - (dy * dy) / Rv2) - dx2 : R2 - dx2 - dy * dy;
+                    if (maxDz2 < 0) continue;
+                    const dzMax = Math.sqrt(maxDz2);
+                    const wzlo = Math.max(bz0, Math.ceil(ev.cz - dzMax)), wzhi = Math.min(bz1, Math.floor(ev.cz + dzMax));
+                    for (let wz = wzlo; wz <= wzhi; wz++) {
+                        const idx = (ly * CS + (wz - bz0)) * CS + lx;
+                        const t = data[idx];
+                        if (t && t !== BLOCKS.BEDROCK) data[idx] = 0; // 岩盤は残す
+                    }
+                }
+            }
+        }
+
+        // --- 爆風なぎ倒し（クレーター外周で地表より上の構造物を撤去・原爆/水爆のみ） ---
+        if (ev.isBomb) {
+            const fr02 = (R * FLATTEN_R0) ** 2, fr12 = fr1 * fr1;
+            const fx0 = Math.max(bx0, Math.ceil(ev.cx - fr1)), fx1 = Math.min(bx1, Math.floor(ev.cx + fr1));
+            const fz0 = Math.max(bz0, Math.ceil(ev.cz - fr1)), fz1 = Math.min(bz1, Math.floor(ev.cz + fr1));
+            for (let wx = fx0; wx <= fx1; wx++) {
+                const dx = wx - ev.cx, dx2 = dx * dx;
+                for (let wz = fz0; wz <= fz1; wz++) {
+                    const dz = wz - ev.cz, r2 = dx2 + dz * dz;
+                    if (r2 < fr02 || r2 > fr12) continue;
+                    const surf = terrainHeightAt(wx, wz);
+                    const yhi = Math.min(by1, surf + blastFlattenHeight(Math.sqrt(r2), R));
+                    let wy = Math.max(by0, surf + 1);
+                    for (; wy <= yhi; wy++) {
+                        const idx = ((wy - by0) * CS + (wz - bz0)) * CS + (wx - bx0);
+                        const t = data[idx];
+                        if (t && t !== BLOCKS.BEDROCK) data[idx] = 0;
+                    }
                 }
             }
         }
@@ -496,6 +532,7 @@ const TREE_MARGIN = 2;
 function houseZone(x, z) { return (x >= 3 && x <= 11 && z >= 3 && z <= 11); }
 function treeAt(wx, wz) {
     if (houseZone(wx, wz)) return false;
+    if (villageMask(wx, wz) >= VILLAGE_THRESHOLD) return false; // 村ゾーンには木を生やさない（家と干渉防止）
     const h = terrainHeightAt(wx, wz);
     if (h < SEA_LEVEL + 1) return false;
     if (strataBlockAt(wx, h, wz, h) !== BLOCKS.GRASS) return false;
@@ -524,6 +561,66 @@ function placeTreesInChunk(ch) {
                 if (bx < bx0 || bx > bx1 || by < by0 || by > by1 || bz < bz0 || bz > bz1) return;
                 const idx = ((by - by0) * CS + (bz - bz0)) * CS + (bx - bx0);
                 if (ch.data[idx] === 0) ch.data[idx] = type; // 空気だけに（幹/既存を侵食しない）
+            });
+        }
+    }
+}
+
+// --- 村（標的になる建物群）。グリッド上のアンカーに家を建て、低周波ノイズで「村ゾーン」に集める。
+//     チャンクごとに独立計算（決定的）＝チャンク境界をまたぐ家も継ぎ目なく出る（木と同じ方式）。
+const VILLAGE_GRID = 11;            // 家アンカーの間隔（家7幅＋通路）
+const HOUSE_HW = 3;                 // 家の半径（footprint 7x7）
+const VILLAGE_MARGIN = HOUSE_HW + 1;
+const VILLAGE_THRESHOLD = 0.62;     // villageMask がこれ以上の所だけ村ゾーン
+function villageMask(x, z) { return fbm2(x * 0.006 + 555, z * 0.006 + 555, worldSeed + 321, 2); }
+// (ax,az) に家を建てるか。建てるなら {gy,wallH} を返す。すべて決定的。
+function houseAt(ax, az) {
+    if (villageMask(ax, az) < VILLAGE_THRESHOLD) return null;
+    if (wnHash(ax, 222, az, worldSeed + 71) > 0.72) return null;        // 村ゾーン内でも一部は空き地(通路/広場)
+    const gy = terrainHeightAt(ax, az);
+    if (gy < SEA_LEVEL + 1) return null;                                // 水辺は除外
+    if (strataBlockAt(ax, gy, az, gy) !== BLOCKS.GRASS) return null;    // 草地だけ
+    let mn = gy, mx = gy;                                               // footprint が平らか（傾斜地は除外）
+    for (let i = 0; i < 4; i++) {
+        const dx = (i & 1) ? HOUSE_HW : -HOUSE_HW, dz = (i & 2) ? HOUSE_HW : -HOUSE_HW;
+        const h = terrainHeightAt(ax + dx, az + dz); if (h < mn) mn = h; if (h > mx) mx = h;
+    }
+    if (mx - mn > 2) return null;
+    return { gy: gy, wallH: 3 + Math.floor(wnHash(ax, 333, az, worldSeed + 91) * 2) }; // 壁の高さ3..4
+}
+function forEachHouseBlock(ax, gy, az, wallH, cb) {
+    const hw = HOUSE_HW, floorY = gy, roofY = floorY + wallH + 1;
+    const doorSide = Math.floor(wnHash(ax, 444, az, worldSeed + 13) * 4); // 0:-x 1:+x 2:-z 3:+z
+    for (let lx = ax - hw; lx <= ax + hw; lx++) {
+        for (let lz = az - hw; lz <= az + hw; lz++) {
+            cb(lx, floorY, lz, BLOCKS.WOOD);          // 床
+            cb(lx, roofY, lz, BLOCKS.STONE);          // 屋根（石＝木壁とのコントラスト）
+            const onEdge = (lx === ax - hw || lx === ax + hw || lz === az - hw || lz === az + hw);
+            if (!onEdge) { for (let by = floorY + 1; by <= roofY - 1; by++) cb(lx, by, lz, 0); continue; } // 内部は空洞に
+            for (let by = floorY + 1; by <= floorY + wallH; by++) {
+                if (by <= floorY + 2) {               // ドア（選ばれた辺の中央・下2マスを開ける）
+                    if (doorSide === 0 && lx === ax - hw && lz === az) continue;
+                    if (doorSide === 1 && lx === ax + hw && lz === az) continue;
+                    if (doorSide === 2 && lz === az - hw && lx === ax) continue;
+                    if (doorSide === 3 && lz === az + hw && lx === ax) continue;
+                }
+                cb(lx, by, lz, BLOCKS.WOOD);          // 壁
+            }
+        }
+    }
+}
+function placeVillagesInChunk(ch) {
+    const bx0 = ch.cx * CS, by0 = ch.cy * CS, bz0 = ch.cz * CS;
+    const bx1 = bx0 + CS - 1, by1 = by0 + CS - 1, bz1 = bz0 + CS - 1;
+    const ax0 = Math.floor((bx0 - VILLAGE_MARGIN) / VILLAGE_GRID) * VILLAGE_GRID; // 届きうるグリッド点のみ
+    const az0 = Math.floor((bz0 - VILLAGE_MARGIN) / VILLAGE_GRID) * VILLAGE_GRID;
+    for (let ax = ax0; ax <= bx1 + VILLAGE_MARGIN; ax += VILLAGE_GRID) {
+        for (let az = az0; az <= bz1 + VILLAGE_MARGIN; az += VILLAGE_GRID) {
+            const house = houseAt(ax, az);
+            if (!house) continue;
+            forEachHouseBlock(ax, house.gy, az, house.wallH, (bx, by, bz, type) => {
+                if (bx < bx0 || bx > bx1 || by < by0 || by > by1 || bz < bz0 || bz > bz1) return;
+                ch.data[((by - by0) * CS + (bz - bz0)) * CS + (bx - bx0)] = type; // 上書き（地形の上に建てる）
             });
         }
     }
@@ -561,6 +658,7 @@ function generateChunk(ch) {
         }
     }
     carveRavinesInChunk(ch);
+    placeVillagesInChunk(ch);        // 村（家）。木より前＝村ゾーンに木を生やさない
     placeTreesInChunk(ch);
     applyExplosionEventsToChunk(ch); // 爆発イベントを再カーブ（block-edit より前＝後から建てた物が上書きで残る）
     applyEditsToChunk(ch);

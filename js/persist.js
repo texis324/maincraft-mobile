@@ -43,6 +43,7 @@ function saveSettings() {
             rocketPower: rocketPower,
             nukePower: nukePower,
             hbombPower: hbombPower,
+            radiationDose: (typeof radiationDose !== 'undefined' ? radiationDose : 0), // ☢ 一生モノの被爆量
             VIEW_DIST: VIEW_DIST,
             WORLD_DEPTH: WORLD_DEPTH,
             worldSeed: worldSeed, // 同じ地形を再現するため（再生成で更新される）
@@ -188,6 +189,8 @@ function loadSettings() {
     const hp = persistGetEl('hbomb-power');
     if (hp) hbombPower = parseInt(hp.value);
     else if (typeof data.hbombPower === 'number') hbombPower = data.hbombPower;
+
+    if (typeof data.radiationDose === 'number') radiationDose = data.radiationDose; // ☢ 過去の被爆を復元
 
     // VIEW_DIST(描画距離) / WORLD_DEPTH は「再生成で実際に適用された値」を権威にする。
     // スライダーを動かしただけ(未適用)の生valueで復元すると不一致が起きるため、適用済み値を使う。

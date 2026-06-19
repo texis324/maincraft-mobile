@@ -42,6 +42,10 @@ let mouseSensitivity = 0.002;
 let playerHP = 100;
 const MAX_HEARTS = 10;
 
+// ☢ 被爆量（目安・mSv）。原爆/水爆の近くにいると累積する一生モノのカウンタ（リセットしない＝笑える）。
+// 永続化(persist)で過去の被爆も積み上がる。通常TNTは非放射性なので増えない。
+let radiationDose = 0;
+
 let isGameOver = false;
 let isPaused = false;
 let isInventoryOpen = false;

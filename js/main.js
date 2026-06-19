@@ -17,6 +17,23 @@ spawnPlayer();
 // （設定を一度も触らない初回起動でも seed が保存されないと、リロードのたびに別世界になる）
 if (typeof saveSettings === 'function') saveSettings();
 
+// ☢ 被爆量HUD（変化時だけDOM更新）。しきい値で色＋目安ステータス。
+let _lastDoseShown = -1;
+function updateRadiationDisplay() {
+    const d = Math.floor(radiationDose);
+    if (d === _lastDoseShown) return;
+    _lastDoseShown = d;
+    const el = document.getElementById('radiation-display');
+    if (!el) return;
+    let status, color;
+    if (d < 100)       { status = '安全';   color = '#7CFC00'; }
+    else if (d < 1000) { status = '注意';   color = '#ffd600'; }
+    else if (d < 4000) { status = '危険';   color = '#ff9100'; }
+    else               { status = '致死量(ゲームだから平気)'; color = '#ff1744'; }
+    el.textContent = `☢ 被爆量: ${d.toLocaleString()} mSv (${status})`;
+    el.style.color = color;
+}
+
 function animate() {
     requestAnimationFrame(animate);
 
@@ -45,6 +62,9 @@ function animate() {
         const z = Math.floor(camera.position.z);
         coordsDisplay.innerText = `X: ${x}  Y: ${y}  Z: ${z}`;
     }
+
+    // ☢ 被爆量表示を更新（変化があった時だけDOM更新）
+    updateRadiationDisplay();
 
     // Paused Logic
     if (isPaused || isInventoryOpen) {
