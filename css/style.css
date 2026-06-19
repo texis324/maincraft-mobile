@@ -346,7 +346,11 @@ input[type=range] {
         bottom: calc(5px + env(safe-area-inset-bottom, 0px));
         gap: 3px;
         padding: 5px;
-        max-width: calc(100vw - 24px);
+        /* 明示幅で画面幅いっぱいに広げ、最小段数で折り返す
+           （abs配置のflex-wrapはmax-widthだけだとshrink-to-fitで横に縮み段数が無駄に増える） */
+        width: calc(100vw - 16px);
+        max-width: calc(100vw - 16px);
+        box-sizing: border-box;
         flex-wrap: wrap;
         justify-content: center;
     }
@@ -356,7 +360,17 @@ input[type=range] {
         pointer-events: auto;
     }
     #hearts-container {
-        bottom: calc(55px + env(safe-area-inset-bottom, 0px));
+        /* 画面下部はジョイスティック+ホットバーで混雑するので、モバイルではハートを上部中央へ逃がす。
+           こうするとホットバーが何段に折り返しても被らない（被り問題の根治）。 */
+        top: calc(8px + env(safe-area-inset-top, 0px));
+        bottom: auto;
+        gap: 3px;
+    }
+    .heart {
+        /* モバイルは小さめにしてすっきり */
+        width: 18px;
+        height: 18px;
+        font-size: 18px;
     }
     /* HUDテキストは左上に縦並び（左下のジョイスティックと重ならないように） */
     #coords-display {

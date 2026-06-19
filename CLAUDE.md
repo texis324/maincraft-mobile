@@ -62,6 +62,7 @@ js/main.js        … メインループ animate()・起動（generateWorld/anim
 - `css/style.css`: 端のタッチ操作・HUD に `env(safe-area-inset-*)` を適用、
   FPS/座標/FLY 表示を左上に縦並びへ再配置（左下ジョイスティックとの重なり回避）、
   ホットバーを flex-wrap + max-width で画面幅内に収める。
+- **ハートとホットバーの被り対策(2026-06-19)**: アイテム14個でホットバーが折り返して背が高くなり、下部のハートと被る。★`#ui-container`に**明示`width: calc(100vw-16px)`+`box-sizing:border-box`**を与える（abs配置のflex-wrapは`max-width`だけだとshrink-to-fitで横に縮み段数が無駄に増える＝142px/3-4段になってた→2段97pxに）。+ ハートはモバイルのみ**上部中央へ移動**(`top:8px; bottom:auto`)＝段数に関係なく被らない根治。`.heart`もモバイル18pxに縮小。PCは`@media`外なので無傷。
 - **オーバーレイ(ポーズ/インベントリ/ゲームオーバー)の見切れ対策(2026-06-19)**: 設定項目が増えて(水爆/マップ広さ深さ/再生成)横向きの低い画面で下が切れる問題。`.overlay-screen` に `overflow-y:auto` + `justify-content: safe center`(収まる時中央/はみ出す時先頭寄せ＝上が切れずスクロール) + セーフエリアpadding。`@media (max-height:520px)` で h1/設定/ボタンをコンパクト化し、`order` で Resume/Reset をタイトル直下へ（設定群を全スクロールせず即戻れる）。インベントリgridは `flex-wrap`。デスクトップ(1920×1080)は中央表示で回帰なし。
 
 ## 追加機能: ☢ 原子爆弾（NUKE）
