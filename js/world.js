@@ -25,7 +25,8 @@ function addBlock(x, y, z, type) {
 
     chunks[key] = mesh;
     blockData[key] = type;
-    mesh.userData = { type: type, x:x, y:y, z:z };
+    // meshIndex を持たせて removeBlock を O(1) にする（原爆など大量消去でのフリーズ防止）
+    mesh.userData = { type: type, x:x, y:y, z:z, meshIndex: blockMeshes.length };
     blockMeshes.push(mesh);
 }
 
@@ -35,8 +36,18 @@ function removeBlock(x, y, z) {
         const mesh = chunks[key];
         scene.remove(mesh);
         mesh.geometry.dispose();
-        const idx = blockMeshes.indexOf(mesh);
-        if (idx !== -1) blockMeshes.splice(idx, 1);
+        // swap-pop で O(1) 削除（末尾要素を削除位置に移してindexを付け替え）
+        const idx = mesh.userData.meshIndex;
+        if (idx !== undefined && blockMeshes[idx] === mesh) {
+            const last = blockMeshes[blockMeshes.length - 1];
+            blockMeshes[idx] = last;
+            last.userData.meshIndex = idx;
+            blockMeshes.pop();
+        } else {
+            // フォールバック（想定外の不整合時）
+            const i = blockMeshes.indexOf(mesh);
+            if (i !== -1) blockMeshes.splice(i, 1);
+        }
         delete chunks[key];
         delete blockData[key];
     }

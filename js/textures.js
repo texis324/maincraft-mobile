@@ -43,6 +43,24 @@ function createTexture(type) {
     } else if (type === 'mega_tnt_top') {
         ctx.fillStyle = '#4A148C'; ctx.fillRect(0,0,64,64);
         ctx.fillStyle = '#FFD700'; ctx.fillRect(26,26,12,12); // 金色の芯
+    } else if (type === 'nuke_side') {
+        // 放射能ハザード（黄×黒のトレフォイル）
+        ctx.fillStyle = '#FFD600'; ctx.fillRect(0,0,64,64);
+        ctx.fillStyle = '#111';
+        ctx.fillRect(0, 0, 64, 6); ctx.fillRect(0, 58, 64, 6); // 上下の黒帯
+        const ncx = 32, ncy = 34;
+        ctx.beginPath(); ctx.arc(ncx, ncy, 5, 0, Math.PI*2); ctx.fill(); // 中心の核
+        for (let k = 0; k < 3; k++) {
+            const a = -Math.PI/2 + k * (2*Math.PI/3);
+            ctx.beginPath();
+            ctx.moveTo(ncx, ncy);
+            ctx.arc(ncx, ncy, 20, a - 0.52, a + 0.52);
+            ctx.closePath(); ctx.fill();
+        }
+    } else if (type === 'nuke_top') {
+        ctx.fillStyle = '#FFD600'; ctx.fillRect(0,0,64,64);
+        ctx.fillStyle = '#111'; ctx.fillRect(24, 24, 16, 16); // 黒い芯
+        ctx.fillStyle = '#FFD600'; ctx.fillRect(29, 29, 6, 6);
     } else if (type === 'water') {
         ctx.fillStyle = '#2196F3'; ctx.fillRect(0,0,64,64);
         ctx.fillStyle = 'rgba(255,255,255,0.2)';
@@ -106,6 +124,8 @@ function initMaterials() {
     rocketLauncherTexture = createTexture('rocket_launcher');
     const megaTntSide = createTexture('mega_tnt_side');
     const megaTntTop = createTexture('mega_tnt_top');
+    const nukeSide = createTexture('nuke_side');
+    const nukeTop = createTexture('nuke_top');
 
     materials[BLOCKS.GRASS] = [
         new THREE.MeshLambertMaterial({ map: grassSide }),
@@ -140,6 +160,14 @@ function initMaterials() {
         new THREE.MeshLambertMaterial({ map: megaTntTop }),
         new THREE.MeshLambertMaterial({ map: megaTntSide }),
         new THREE.MeshLambertMaterial({ map: megaTntSide })
+    ];
+    materials[BLOCKS.NUKE] = [
+        new THREE.MeshLambertMaterial({ map: nukeSide }),
+        new THREE.MeshLambertMaterial({ map: nukeSide }),
+        new THREE.MeshLambertMaterial({ map: nukeTop }),
+        new THREE.MeshLambertMaterial({ map: nukeTop }),
+        new THREE.MeshLambertMaterial({ map: nukeSide }),
+        new THREE.MeshLambertMaterial({ map: nukeSide })
     ];
     materials[BLOCKS.WATER] = new THREE.MeshLambertMaterial({ map: water, transparent: true, opacity: 0.6, side: THREE.DoubleSide });
     materials[BLOCKS.BEDROCK] = new THREE.MeshLambertMaterial({ map: bedrock });

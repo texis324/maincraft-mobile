@@ -21,6 +21,7 @@
         右クリック: 設置 / 銃発射<br>
         E: インベントリ<br>
         Esc: ポーズ<br>
+        ☢ 原爆: ⑦で選び設置 → ⑧火打石で着火（5秒後に大爆発）<br>
     </div>
 
     <div id="fps-counter">FPS: 60</div>
@@ -53,6 +54,10 @@
             <div style="display: flex; flex-direction: column; gap: 5px;">
                 <label for="rocket-power">ロケット威力: <span id="rocket-power-value">5</span></label>
                 <input type="range" id="rocket-power" min="1" max="10" value="5" style="width: 200px;">
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 5px;">
+                <label for="nuke-power">☢ 原爆の威力(半径): <span id="nuke-power-value">30</span></label>
+                <input type="range" id="nuke-power" min="10" max="50" value="30" style="width: 200px;">
             </div>
         </div>
 

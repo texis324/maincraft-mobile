@@ -72,6 +72,7 @@ function animate() {
     }
 
     updateParticles(delta);
+    updateMushroom(delta); // 原爆のキノコ雲を更新
     updatePrimedTNTs(delta); // Update Physics TNT
     updateRockets(delta); // Update Rockets
     updateGunAnimation(delta); // 銃のアニメーション更新

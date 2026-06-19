@@ -69,6 +69,48 @@ function playSound(type, materialType) {
         return;
     }
 
+    if (type === 'nuke') {
+        lastExplosionTime = now;
+
+        // 初撃のクラック（バンドパスノイズ）
+        const crack = audioCtx.createBufferSource();
+        crack.buffer = noiseBuffer;
+        const cFilter = audioCtx.createBiquadFilter();
+        cFilter.type = 'bandpass';
+        cFilter.frequency.value = 1200;
+        const cGain = audioCtx.createGain();
+        cGain.gain.setValueAtTime(0.5, now);
+        cGain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+        crack.connect(cFilter); cFilter.connect(cGain); cGain.connect(masterGain);
+        crack.start(); crack.stop(now + 0.3);
+
+        // 深い重低音（サブ）
+        const sub = audioCtx.createOscillator();
+        sub.type = 'sine';
+        sub.frequency.setValueAtTime(70, now);
+        sub.frequency.exponentialRampToValueAtTime(8, now + 1.5);
+        const subGain = audioCtx.createGain();
+        subGain.gain.setValueAtTime(0.7, now);
+        subGain.gain.exponentialRampToValueAtTime(0.01, now + 1.8);
+        sub.connect(subGain); subGain.connect(masterGain);
+        sub.start(); sub.stop(now + 1.8);
+
+        // 長く尾を引く轟音（ローパスノイズ）
+        const rumble = audioCtx.createBufferSource();
+        rumble.buffer = noiseBuffer;
+        rumble.loop = true;
+        const rFilter = audioCtx.createBiquadFilter();
+        rFilter.type = 'lowpass';
+        rFilter.frequency.setValueAtTime(500, now);
+        rFilter.frequency.exponentialRampToValueAtTime(60, now + 2.6);
+        const rGain = audioCtx.createGain();
+        rGain.gain.setValueAtTime(0.6, now);
+        rGain.gain.exponentialRampToValueAtTime(0.01, now + 2.8);
+        rumble.connect(rFilter); rFilter.connect(rGain); rGain.connect(masterGain);
+        rumble.start(); rumble.stop(now + 2.8);
+        return;
+    }
+
     const gain = audioCtx.createGain();
     gain.connect(masterGain);
 

@@ -25,6 +25,13 @@ document.getElementById('rocket-power').addEventListener('input', (e) => {
     rocketPower = parseInt(e.target.value);
     document.getElementById('rocket-power-value').textContent = rocketPower;
 });
+const nukePowerSlider = document.getElementById('nuke-power');
+if (nukePowerSlider) {
+    nukePowerSlider.addEventListener('input', (e) => {
+        nukePower = parseInt(e.target.value);
+        document.getElementById('nuke-power-value').textContent = nukePower;
+    });
+}
 
 // Prevent click-through on UI
 const stopProp = (e) => e.stopPropagation();
@@ -93,6 +100,9 @@ document.addEventListener('keydown', (event) => {
         if (event.code === 'Digit5') setSlot(4);
         if (event.code === 'Digit6') setSlot(5);
         if (event.code === 'Digit7') setSlot(6);
+        if (event.code === 'Digit8') setSlot(7);
+        if (event.code === 'Digit9') setSlot(8);
+        if (event.code === 'Digit0') setSlot(9);
 
         // Cキーで銃を発射
         if (event.code === 'KeyC') {

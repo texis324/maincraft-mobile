@@ -126,6 +126,12 @@ function attemptPlaceOrIgnite(screenX, screenY) {
             return;
         }
 
+        // 原子爆弾の点火
+        if (currentItem === BLOCKS.FLINT && type === BLOCKS.NUKE) {
+            igniteTNT(obj.userData.x, obj.userData.y, obj.userData.z, null, false, true);
+            return;
+        }
+
         if (BLOCK_PROPS[currentItem].isTool) return;
 
         const nx = Math.round(intersect.face.normal.x);

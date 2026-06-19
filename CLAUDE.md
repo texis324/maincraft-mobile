@@ -63,6 +63,15 @@ js/main.js        … メインループ animate()・起動（generateWorld/anim
   FPS/座標/FLY 表示を左上に縦並びへ再配置（左下ジョイスティックとの重なり回避）、
   ホットバーを flex-wrap + max-width で画面幅内に収める。
 
+## 追加機能: ☢ 原子爆弾（NUKE）
+
+- `BLOCKS.NUKE = 8`。インベントリ7番目（FLINTの直前）。アイコンは黄/黒の放射能トレフォイル（`textures.js` の `nuke_side`/`nuke_top`、`materials[BLOCKS.NUKE]` は6面マテリアル配列）。
+- 操作: NUKEブロックを設置 → 火打石(FLINT)で右クリック着火（`actions.js`）。導火線5秒（`entities.js createPrimedTNT` の `isNuke`分岐）。
+- 仕組み: TNT機構に `isNuke` フラグを並走させる（`createPrimedTNT`/`igniteTNT`/`updatePrimedTNTs`/`explode` の第6引数）。`explode` の `isNuke` 分岐で半径=`nukePower`(既定30)・大量パーティクル・`triggerNukeFlash()`(DOMホワイトフラッシュ)・`createMushroomCloud()`(火球+茎+ドーム傘のボクセル煙、`smokeParticles`/`updateMushroom`、main.js のループで更新)・`nukeScreenShake()`(camera.roll を一時的に揺らす)。
+- 威力スライダー: ポーズメニュー `#nuke-power`（10〜50）→ `nukePower`（config.js）。
+- ⚠ ダメージは即死級だが、ポーズメニューの「ダメージ無効」既定ONなら死なない。
+- **性能: `removeBlock` を swap-pop で O(1) 化**（`mesh.userData.meshIndex`）。原爆で約3000ブロック消去しても62ms（実測）でフリーズしない。**マップ拡張（WORLD_SIZE増）の下地にもなる**＝旧来の `blockMeshes.indexOf` O(n) が大量消去で O(n²) になる問題を解消済み。
+
 ## 開発フロー / 既知の事項
 
 - 作業ブランチ: `claude/game-bug-check-refactor-po14h4`。`main` へは PR 経由でマージ。

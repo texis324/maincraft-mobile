@@ -11,13 +11,13 @@ function disposePrimedTNTMesh(mesh) {
     }
 }
 
-function createPrimedTNT(x, y, z, velocity, isMega = false) {
+function createPrimedTNT(x, y, z, velocity, isMega = false, isNuke = false) {
     // Remove block if it exists
     removeBlock(x, y, z);
 
     const geometry = new THREE.BoxGeometry(0.98, 0.98, 0.98); // Slightly smaller
     // Clone materials for flashing
-    let mat = materials[isMega ? BLOCKS.MEGA_TNT : BLOCKS.TNT];
+    let mat = materials[isNuke ? BLOCKS.NUKE : (isMega ? BLOCKS.MEGA_TNT : BLOCKS.TNT)];
     if(Array.isArray(mat)) mat = mat.map(m => m.clone());
     else mat = mat.clone();
 
@@ -27,8 +27,10 @@ function createPrimedTNT(x, y, z, velocity, isMega = false) {
     scene.add(mesh);
 
     // Add slight randomness to fuse so they don't explode all at once in a stack
-    // MEGA TNTは少し長めの導火線
-    const fuse = isMega ? (4.0 + Math.random() * 0.5) : (3.0 + Math.random() * 0.5);
+    // MEGA TNTは少し長め、原爆はさらに長め（逃げる/飛んで眺める時間）
+    let fuse = 3.0 + Math.random() * 0.5;
+    if (isNuke) fuse = 5.0 + Math.random() * 0.5;
+    else if (isMega) fuse = 4.0 + Math.random() * 0.5;
 
     primedTNTs.push({
         mesh: mesh,
@@ -36,15 +38,16 @@ function createPrimedTNT(x, y, z, velocity, isMega = false) {
         fuse: fuse,
         flashTimer: 0,
         isMega: isMega, // MEGA TNTかどうかのフラグ
+        isNuke: isNuke, // 原子爆弾かどうかのフラグ
         grounded: false // 接地フラグ
     });
 }
 
-function igniteTNT(x, y, z, velocity, isMega = false) {
+function igniteTNT(x, y, z, velocity, isMega = false, isNuke = false) {
     playSound('ignite');
     // Default small hop if triggered by player
     const initialVel = velocity || new THREE.Vector3((Math.random()-0.5)*0.2, 0.3, (Math.random()-0.5)*0.2);
-    createPrimedTNT(x, y, z, initialVel, isMega);
+    createPrimedTNT(x, y, z, initialVel, isMega, isNuke);
 }
 
 function updatePrimedTNTs(delta) {
@@ -167,7 +170,7 @@ function updatePrimedTNTs(delta) {
         }
 
         if (tnt.fuse <= 0) {
-            explode(tnt.mesh.position.x, tnt.mesh.position.y, tnt.mesh.position.z, tnt.isMega);
+            explode(tnt.mesh.position.x, tnt.mesh.position.y, tnt.mesh.position.z, tnt.isMega, null, tnt.isNuke);
             scene.remove(tnt.mesh);
             disposePrimedTNTMesh(tnt.mesh); // 複製したジオメトリ・マテリアルを破棄
             primedTNTs.splice(i, 1);
@@ -258,14 +261,22 @@ function updateRockets(delta) {
     }
 }
 
-function explode(cx, cy, cz, isMega = false, customRadius = null) {
-    playSound('explode');
+function explode(cx, cy, cz, isMega = false, customRadius = null, isNuke = false) {
+    // 原子爆弾は専用の演出（ホワイトフラッシュ・キノコ雲・画面揺れ・重低音）
+    if (isNuke) {
+        playSound('nuke');
+        triggerNukeFlash();
+        nukeScreenShake();
+    } else {
+        playSound('explode');
+    }
 
-    // MEGA TNTは半径2倍、ダメージとノックバックも強化
-    const radius = customRadius !== null ? customRadius : (isMega ? 8 : 4);
-    const particleCount = isMega ? 60 : 30;
-    const particleSize = isMega ? 0.6 : 0.4;
-    createBlockParticles(cx, cy, cz, isMega ? BLOCKS.MEGA_TNT : BLOCKS.TNT, particleCount, particleSize);
+    // 半径: 原爆 > customRadius > MEGA(8) > 通常(4)
+    const radius = isNuke ? nukePower : (customRadius !== null ? customRadius : (isMega ? 8 : 4));
+    const particleCount = isNuke ? 140 : (isMega ? 60 : 30);
+    const particleSize = isNuke ? 0.8 : (isMega ? 0.6 : 0.4);
+    createBlockParticles(cx, cy, cz, isNuke ? BLOCKS.NUKE : (isMega ? BLOCKS.MEGA_TNT : BLOCKS.TNT), particleCount, particleSize);
+    if (isNuke) createMushroomCloud(cx, cy, cz, radius);
 
     // Affect blocks and other TNTs
     for(let x = Math.floor(cx - radius); x <= Math.ceil(cx + radius); x++) {
@@ -282,8 +293,8 @@ function explode(cx, cy, cz, isMega = false, customRadius = null) {
                             const dx = x - cx;
                             const dy = y - cy;
                             const dz = z - cz;
-                            // Normalized direction * force (MEGA TNTはより強い力)
-                            const force = (1 - dist / radius) * (isMega ? 30 : 20);
+                            // Normalized direction * force (MEGA/原爆はより強い力)
+                            const force = (1 - dist / radius) * (isNuke ? 40 : (isMega ? 30 : 20));
                             const velocity = new THREE.Vector3(dx, dy + 0.5, dz).normalize().multiplyScalar(force);
 
                             igniteTNT(x, y, z, velocity, false);
@@ -292,7 +303,7 @@ function explode(cx, cy, cz, isMega = false, customRadius = null) {
                             const dx = x - cx;
                             const dy = y - cy;
                             const dz = z - cz;
-                            const force = (1 - dist / radius) * (isMega ? 35 : 25);
+                            const force = (1 - dist / radius) * (isNuke ? 45 : (isMega ? 35 : 25));
                             const velocity = new THREE.Vector3(dx, dy + 0.5, dz).normalize().multiplyScalar(force);
 
                             igniteTNT(x, y, z, velocity, true); // MEGA TNTとして点火
@@ -307,7 +318,7 @@ function explode(cx, cy, cz, isMega = false, customRadius = null) {
     }
 
     // Also push existing Primed TNTs (着火済みTNTを吹き飛ばす)
-    const pushForceMultiplier = isMega ? 45 : 30;
+    const pushForceMultiplier = isNuke ? 70 : (isMega ? 45 : 30);
     for(let i=0; i<primedTNTs.length; i++) {
         const tnt = primedTNTs[i];
         const dist = tnt.mesh.position.distanceTo(new THREE.Vector3(cx, cy, cz));
@@ -322,10 +333,11 @@ function explode(cx, cy, cz, isMega = false, customRadius = null) {
     }
 
     const distToPlayer = camera.position.distanceTo(new THREE.Vector3(cx, cy, cz));
-    // MEGA TNTはより広い範囲でダメージ、より大きなダメージとノックバック
-    const damageRadius = isMega ? radius * 2.5 : radius * 2;
-    const maxDamage = isMega ? 120 : 80;
-    const knockbackForce = isMega ? 50 : 30;
+    // MEGA/原爆はより広い範囲でダメージ、より大きなダメージとノックバック
+    // （原爆は即死級。ただしポーズメニューの「ダメージ無効」ONなら死なない）
+    const damageRadius = isNuke ? radius * 1.3 : (isMega ? radius * 2.5 : radius * 2);
+    const maxDamage = isNuke ? 9999 : (isMega ? 120 : 80);
+    const knockbackForce = isNuke ? 80 : (isMega ? 50 : 30);
     if(distToPlayer < damageRadius) {
         const damage = Math.floor((1 - (distToPlayer / damageRadius)) * maxDamage);
         takeDamage(damage);
@@ -392,6 +404,111 @@ function updateParticles(delta) {
             // ジオメトリ・マテリアルは共有しているので dispose しない
             scene.remove(p);
             particles.splice(i, 1);
+        }
+    }
+}
+
+// --- 原子爆弾の演出（ホワイトフラッシュ / キノコ雲 / 画面揺れ） ---
+
+// 画面全体を一瞬白く飛ばす（DOMオーバーレイ。CSSファイル不要）
+function triggerNukeFlash() {
+    let flash = document.getElementById('nuke-flash');
+    if (!flash) {
+        flash = document.createElement('div');
+        flash.id = 'nuke-flash';
+        flash.style.cssText = 'position:fixed;inset:0;background:#ffffff;pointer-events:none;z-index:9998;opacity:0;';
+        document.body.appendChild(flash);
+    }
+    flash.style.transition = 'none';
+    flash.style.opacity = '1';
+    // opacity:1 を一度描画させてからフェードアウト
+    requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+            flash.style.transition = 'opacity 1.3s ease-out';
+            flash.style.opacity = '0';
+        });
+    });
+}
+
+// 画面揺れ。camera の roll(z) を一時的に揺らす（yaw/pitch のマウス操作と干渉しない）
+function nukeScreenShake(duration = 0.9, intensity = 0.06) {
+    const start = performance.now();
+    function step() {
+        const t = (performance.now() - start) / 1000;
+        if (t >= duration) { camera.rotation.z = 0; return; }
+        const decay = 1 - t / duration;
+        camera.rotation.z = (Math.random() - 0.5) * intensity * decay * 2;
+        requestAnimationFrame(step);
+    }
+    step();
+}
+
+// キノコ雲（火球 + 立ち上る茎 + 上部で広がる傘）。ボクセル風の煙キューブ。
+const smokeParticles = [];
+function spawnSmoke(x, y, z, color, size, vel, life, grow, buoy) {
+    const mesh = new THREE.Mesh(particleGeometry, getParticleMaterial(color));
+    mesh.position.set(x, y, z);
+    mesh.scale.set(size, size, size);
+    mesh.userData = { velocity: vel, life: life, size: size, grow: grow, buoy: buoy };
+    scene.add(mesh);
+    smokeParticles.push(mesh);
+}
+
+function createMushroomCloud(cx, cy, cz, radius) {
+    const stemH = Math.max(8, radius * 0.9);
+    const capR = Math.max(4, radius * 0.55);
+    const smoke = [0x888888, 0x9e9e9e, 0x6d6d6d, 0x757575];
+    const fire = [0xff6a00, 0xff9100, 0xffc107, 0xffe082];
+
+    // 地表の火球（短命・明るい）
+    for (let i = 0; i < 50; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const r = Math.random() * radius * 0.4;
+        const vel = new THREE.Vector3(Math.cos(a) * (2 + Math.random() * 6), 2 + Math.random() * 5, Math.sin(a) * (2 + Math.random() * 6));
+        spawnSmoke(cx + Math.cos(a) * r, cy + Math.random() * 2, cz + Math.sin(a) * r,
+            fire[i % fire.length], 1.2 + Math.random() * 1.5, vel, 0.7 + Math.random() * 0.5, 2.0, 4.0);
+    }
+
+    // 茎（立ち上る煙の柱）
+    const stemCount = Math.floor(stemH * 4);
+    for (let i = 0; i < stemCount; i++) {
+        const t = i / stemCount;
+        const y = cy + t * stemH;
+        const swirl = Math.random() * Math.PI * 2;
+        const rr = (0.6 + t * 0.8) * (1 + Math.random());
+        const vel = new THREE.Vector3((Math.random() - 0.5) * 1.5, 4 + Math.random() * 4, (Math.random() - 0.5) * 1.5);
+        spawnSmoke(cx + Math.cos(swirl) * rr, y, cz + Math.sin(swirl) * rr,
+            smoke[i % smoke.length], 1.5 + Math.random() * 1.5, vel, 2.5 + Math.random() * 1.5, 0.8, 3.5);
+    }
+
+    // 傘（上部でドーム状に外へ広がる）
+    const capCount = Math.floor(capR * 14);
+    const capY = cy + stemH;
+    for (let i = 0; i < capCount; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const r = Math.random() * capR;
+        const dome = Math.cos((r / capR) * Math.PI / 2) * capR * 0.5;
+        const vel = new THREE.Vector3(Math.cos(a) * (2 + r * 0.3), 1 + Math.random() * 2, Math.sin(a) * (2 + r * 0.3));
+        spawnSmoke(cx + Math.cos(a) * r, capY + dome + (Math.random() - 0.5) * 2, cz + Math.sin(a) * r,
+            smoke[i % smoke.length], 2.0 + Math.random() * 2.0, vel, 3.0 + Math.random() * 1.5, 1.2, 1.5);
+    }
+}
+
+function updateMushroom(delta) {
+    for (let i = smokeParticles.length - 1; i >= 0; i--) {
+        const p = smokeParticles[i];
+        const d = p.userData;
+        d.life -= delta;
+        d.velocity.y += d.buoy * delta;             // 浮力で上昇
+        d.velocity.multiplyScalar(1 - 0.6 * delta); // 空気抵抗
+        p.position.add(d.velocity.clone().multiplyScalar(delta));
+        d.size += d.grow * delta;                   // 膨張
+        const fade = Math.min(1, d.life);           // 終端1秒で縮小フェード
+        const s = Math.max(0, d.size * fade);
+        p.scale.set(s, s, s);
+        if (d.life <= 0) {
+            scene.remove(p);
+            smokeParticles.splice(i, 1);
         }
     }
 }

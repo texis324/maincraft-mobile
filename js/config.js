@@ -36,16 +36,20 @@ const BLOCKS = {
     BEDROCK: 99,
     TNT_LAUNCHER: 101, // TNT Gun
     MEGA_TNT: 7, // 超強力TNT（半径2倍）
-    ROCKET_LAUNCHER: 102 // ロケットランチャー
+    ROCKET_LAUNCHER: 102, // ロケットランチャー
+    NUKE: 8 // 原子爆弾（超広範囲・キノコ雲）
 };
 
 // Initial Inventory Order
-let INVENTORY = [BLOCKS.GRASS, BLOCKS.STONE, BLOCKS.WOOD, BLOCKS.LEAVES, BLOCKS.TNT, BLOCKS.MEGA_TNT, BLOCKS.FLINT, BLOCKS.WATER, BLOCKS.TNT_LAUNCHER, BLOCKS.ROCKET_LAUNCHER];
+let INVENTORY = [BLOCKS.GRASS, BLOCKS.STONE, BLOCKS.WOOD, BLOCKS.LEAVES, BLOCKS.TNT, BLOCKS.MEGA_TNT, BLOCKS.NUKE, BLOCKS.FLINT, BLOCKS.WATER, BLOCKS.TNT_LAUNCHER, BLOCKS.ROCKET_LAUNCHER];
 let selectedItemIndex = 0;
 let swapSourceIndex = -1;
 
 // ロケットランチャーの威力設定（1-10）
 let rocketPower = 5;
+
+// 原子爆弾の威力（爆発半径・10〜50）
+let nukePower = 30;
 
 const BLOCK_PROPS = {
     [BLOCKS.GRASS]: { color: 0x795548, sound: 'soft' },
@@ -54,6 +58,7 @@ const BLOCK_PROPS = {
     [BLOCKS.LEAVES]: { color: 0x66BB6A, sound: 'soft' },
     [BLOCKS.TNT]: { color: 0xD32F2F, sound: 'soft' },
     [BLOCKS.MEGA_TNT]: { color: 0x4A148C, sound: 'soft' }, // 紫色の超強力TNT
+    [BLOCKS.NUKE]: { color: 0xFFD600, sound: 'soft' }, // 原子爆弾（放射能イエロー）
     [BLOCKS.WATER]: { color: 0x2196F3, sound: 'water', transparent: true, opacity: 0.6, noCollide: true },
     [BLOCKS.BEDROCK]: { color: 0x000000, sound: 'hard' },
     [BLOCKS.FLINT]: { isTool: true },
