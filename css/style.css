@@ -125,10 +125,15 @@ body { margin: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Ver
     background: rgba(0, 0, 0, 0.65);
     color: white;
     flex-direction: column;
-    justify-content: center;
+    /* 収まる時は中央、はみ出す時は先頭寄せ＝上が見切れずスクロールで全部届く（横向きスマホ対策） */
+    justify-content: safe center;
     align-items: center;
     z-index: 50;
     backdrop-filter: blur(4px);
+    overflow-y: auto;            /* 縦に収まらない分はスクロール可能に */
+    box-sizing: border-box;
+    /* セーフエリア（ノッチ/丸角）を避けた余白。横向きの左右インセットも考慮 */
+    padding: calc(12px + env(safe-area-inset-top, 0px)) calc(12px + env(safe-area-inset-right, 0px)) calc(12px + env(safe-area-inset-bottom, 0px)) calc(12px + env(safe-area-inset-left, 0px));
 }
 .overlay-screen h1 {
     font-size: 40px;
@@ -168,6 +173,21 @@ body { margin: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Ver
     align-items: center;
     gap: 10px;
     font-size: 18px;
+}
+
+/* 低い画面（横向きスマホ等）でポーズ/設定が縦に収まらない対策：コンパクト化して
+   できるだけ1画面に収め、はみ出しはオーバーレイのスクロールで届くようにする */
+@media (max-height: 520px) {
+    .overlay-screen h1 { font-size: 24px; margin-bottom: 8px; }
+    .settings-panel { padding: 10px 14px; gap: 8px; margin: 10px 0; }
+    .settings-panel label { font-size: 14px; gap: 6px; }
+    .settings-panel input[type=range] { width: 180px !important; }
+    .overlay-screen button { padding: 8px 14px; margin: 5px; font-size: 14px; width: 200px; }
+    /* 低い画面では Resume/Reset をタイトル直下に出して即押せるように（設定は下にスクロール） */
+    #pause-menu h1 { order: 0; }
+    #pause-menu #btn-resume { order: 1; }
+    #pause-menu #btn-reset { order: 2; }
+    #pause-menu #settings-panel { order: 3; }
 }
 
 /* Inventory Specific */
@@ -356,6 +376,14 @@ input[type=range] {
     }
     #crosshair {
         display: none; /* モバイルでは十字を非表示 */
+    }
+    /* インベントリのグリッドは画面幅内で折り返す（14スロットで横にはみ出さないように） */
+    #inventory-screen .inv-grid {
+        flex-wrap: wrap;
+        justify-content: center;
+        max-width: calc(100vw - 24px);
+        padding: 10px;
+        gap: 6px;
     }
     #mobile-hint {
         top: calc(70px + env(safe-area-inset-top, 0px));

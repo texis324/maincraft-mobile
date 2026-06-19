@@ -62,6 +62,7 @@ js/main.js        … メインループ animate()・起動（generateWorld/anim
 - `css/style.css`: 端のタッチ操作・HUD に `env(safe-area-inset-*)` を適用、
   FPS/座標/FLY 表示を左上に縦並びへ再配置（左下ジョイスティックとの重なり回避）、
   ホットバーを flex-wrap + max-width で画面幅内に収める。
+- **オーバーレイ(ポーズ/インベントリ/ゲームオーバー)の見切れ対策(2026-06-19)**: 設定項目が増えて(水爆/マップ広さ深さ/再生成)横向きの低い画面で下が切れる問題。`.overlay-screen` に `overflow-y:auto` + `justify-content: safe center`(収まる時中央/はみ出す時先頭寄せ＝上が切れずスクロール) + セーフエリアpadding。`@media (max-height:520px)` で h1/設定/ボタンをコンパクト化し、`order` で Resume/Reset をタイトル直下へ（設定群を全スクロールせず即戻れる）。インベントリgridは `flex-wrap`。デスクトップ(1920×1080)は中央表示で回帰なし。
 
 ## 追加機能: ☢ 原子爆弾（NUKE）
 
