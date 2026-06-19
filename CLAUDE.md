@@ -72,6 +72,22 @@ js/main.js        … メインループ animate()・起動（generateWorld/anim
 - ⚠ ダメージは即死級だが、ポーズメニューの「ダメージ無効」既定ONなら死なない。
 - **性能: `removeBlock` を swap-pop で O(1) 化**（`mesh.userData.meshIndex`）。原爆で約3000ブロック消去しても62ms（実測）でフリーズしない。**マップ拡張（WORLD_SIZE増）の下地にもなる**＝旧来の `blockMeshes.indexOf` O(n) が大量消去で O(n²) になる問題を解消済み。
 
+## 追加機能: 深さ調節マップ＋サーフェスカリング（world.js 全面改修）
+
+- **二層管理**: `blockData`=全固体ブロック（地中の埋没含む・衝突/爆破の真実）／`chunks`=実際にメッシュを持つ（見える）ブロックだけ／`blockMeshes`=レイキャスト対象。
+- **サーフェスカリング**: `shouldRender()`＝透過ブロックは常時、不透明は露出時(`isExposed`)のみメッシュ化。`neighborOccludes`はワールド底(`worldBottomY`)より下を遮蔽扱い＝裏面を描かない。実測 全78kブロックでメッシュ13k（16%）。**深くしてもメッシュはほぼ増えない**＝深さ青天井の土台。
+- **採掘/爆破で露出**: `removeBlock(x,y,z,skipReveal)`。除去後に6隣接を`revealIfNeeded`で再メッシュ（埋没ブロックが見える）。爆破は`skipReveal=true`で一括除去→殻候補Setを最後にまとめて再メッシュ（spawnチャーン回避）。
+- **共有ジオメトリ**: 全地形ブロックで`sharedBlockGeometry`を共有（個別disposeしない＝メモリ激減）。`removeBlock`はジオメトリ/マテリアルをdisposeしない。
+- **設定**: `WORLD_SIZE`(let・32〜128)/`WORLD_DEPTH`(4〜48)/`SURFACE_Y`=2/`worldBottomY`=SURFACE_Y-1-DEPTH。`generateWorld()`は岩盤底＋石充填＋地表(草/水)。ポーズメニューのスライダー＋「マップ再生成」(`regenerateWorld`)で作り直し→プレイヤーを地上に戻す。
+
+## 追加機能: ☢☢ 水素爆弾 / 空爆 / クレーター掘削
+
+- **bombKind 化**: 旧 `isNuke` ブール → `bombKind`(null|'nuke'|'hbomb')を `createPrimedTNT`/`igniteTNT`/`explode` に通す。水爆=`hbombPower`(30〜60)・二段フラッシュ・巨大キノコ雲。
+- **クレーター掘削**: `explode` は球状に`inBlast`判定でえぐる。`bottomY=max(worldBottomY+1, floor(cy)-min(radius,30))`＝掘削深さは爆心から最大30（深いマップで底まで掘って激重化するのを防止）。Y上限も地表+8でキャップ（空中セルの無駄走査回避）。破片パーティクルは地表付近(y≥SURFACE_Y-2)のみ。
+- **空爆 `callAirstrike()`(Gキー)**: 視線方向の上空(SURFACE_Y+45)から `impactDetonate=true` の爆弾を時間差で12発投下→落下→着弾で爆発（`updatePrimedTNTs`で接地時に`fuse=0`）。飛行機描写は省略。
+- **実測フリーズ**: 通常原爆(半径30/深さ16)≈0.28秒で快適。水爆(半径50/深さ24)≈0.96秒。最悪(半径60/深さ48)≈1.5秒。ボトルネックは大量の `delete blockData[key]`（V8の巨大オブジェクトdelete）。**将来の最適化案=クレーターを数フレームに分割(アニメ化)／blockDataをMap化**。
+- ⚠ `explode` で `const bottomY` が `radius` を参照するので順序注意（`R`はTDZで使えない）。
+
 ## 開発フロー / 既知の事項
 
 - 作業ブランチ: `claude/game-bug-check-refactor-po14h4`。`main` へは PR 経由でマージ。

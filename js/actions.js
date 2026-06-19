@@ -128,7 +128,13 @@ function attemptPlaceOrIgnite(screenX, screenY) {
 
         // 原子爆弾の点火
         if (currentItem === BLOCKS.FLINT && type === BLOCKS.NUKE) {
-            igniteTNT(obj.userData.x, obj.userData.y, obj.userData.z, null, false, true);
+            igniteTNT(obj.userData.x, obj.userData.y, obj.userData.z, null, false, 'nuke');
+            return;
+        }
+
+        // 水素爆弾の点火
+        if (currentItem === BLOCKS.FLINT && type === BLOCKS.HBOMB) {
+            igniteTNT(obj.userData.x, obj.userData.y, obj.userData.z, null, false, 'hbomb');
             return;
         }
 

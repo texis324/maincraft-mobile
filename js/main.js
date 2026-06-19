@@ -179,7 +179,7 @@ function animate() {
         }
     }
 
-    if(camera.position.y < -20) {
+    if(camera.position.y < worldBottomY - 8) {
         takeDamage(100);
     }
 

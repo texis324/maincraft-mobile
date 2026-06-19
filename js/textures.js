@@ -61,6 +61,16 @@ function createTexture(type) {
         ctx.fillStyle = '#FFD600'; ctx.fillRect(0,0,64,64);
         ctx.fillStyle = '#111'; ctx.fillRect(24, 24, 16, 16); // 黒い芯
         ctx.fillStyle = '#FFD600'; ctx.fillRect(29, 29, 6, 6);
+    } else if (type === 'hbomb_side') {
+        // 水素爆弾（赤橙＋黒帯＋白H）
+        ctx.fillStyle = '#FF3D00'; ctx.fillRect(0,0,64,64);
+        ctx.fillStyle = '#111'; ctx.fillRect(0, 0, 64, 7); ctx.fillRect(0, 57, 64, 7);
+        ctx.fillStyle = '#FFEB3B';
+        ctx.fillRect(20, 16, 6, 32); ctx.fillRect(38, 16, 6, 32); ctx.fillRect(20, 29, 24, 6); // 文字H
+    } else if (type === 'hbomb_top') {
+        ctx.fillStyle = '#FF3D00'; ctx.fillRect(0,0,64,64);
+        ctx.fillStyle = '#111'; ctx.fillRect(22, 22, 20, 20);
+        ctx.fillStyle = '#FFEB3B'; ctx.fillRect(29, 26, 6, 12);
     } else if (type === 'water') {
         ctx.fillStyle = '#2196F3'; ctx.fillRect(0,0,64,64);
         ctx.fillStyle = 'rgba(255,255,255,0.2)';
@@ -126,6 +136,8 @@ function initMaterials() {
     const megaTntTop = createTexture('mega_tnt_top');
     const nukeSide = createTexture('nuke_side');
     const nukeTop = createTexture('nuke_top');
+    const hbombSide = createTexture('hbomb_side');
+    const hbombTop = createTexture('hbomb_top');
 
     materials[BLOCKS.GRASS] = [
         new THREE.MeshLambertMaterial({ map: grassSide }),
@@ -168,6 +180,14 @@ function initMaterials() {
         new THREE.MeshLambertMaterial({ map: nukeTop }),
         new THREE.MeshLambertMaterial({ map: nukeSide }),
         new THREE.MeshLambertMaterial({ map: nukeSide })
+    ];
+    materials[BLOCKS.HBOMB] = [
+        new THREE.MeshLambertMaterial({ map: hbombSide }),
+        new THREE.MeshLambertMaterial({ map: hbombSide }),
+        new THREE.MeshLambertMaterial({ map: hbombTop }),
+        new THREE.MeshLambertMaterial({ map: hbombTop }),
+        new THREE.MeshLambertMaterial({ map: hbombSide }),
+        new THREE.MeshLambertMaterial({ map: hbombSide })
     ];
     materials[BLOCKS.WATER] = new THREE.MeshLambertMaterial({ map: water, transparent: true, opacity: 0.6, side: THREE.DoubleSide });
     materials[BLOCKS.BEDROCK] = new THREE.MeshLambertMaterial({ map: bedrock });

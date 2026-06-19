@@ -1,5 +1,8 @@
 // --- 1. Game Config & Performance Settings ---
-const WORLD_SIZE = 32;
+let WORLD_SIZE = 64;      // マップの一辺（再生成で変更可・スライダー 32〜128）
+let WORLD_DEPTH = 16;     // 地表より下に何層の石を生成するか（爆弾でクレーターを掘れる）
+let worldBottomY = -1;    // 岩盤の底のY（generateWorldで計算）
+const SURFACE_Y = 2;      // 地表（草/水）のY。岩盤の底=SURFACE_Y-1-WORLD_DEPTH
 const WORLD_HEIGHT = 8;
 const GRAVITY = 20.0;
 const JUMP_FORCE = 8.0;
@@ -37,11 +40,12 @@ const BLOCKS = {
     TNT_LAUNCHER: 101, // TNT Gun
     MEGA_TNT: 7, // 超強力TNT（半径2倍）
     ROCKET_LAUNCHER: 102, // ロケットランチャー
-    NUKE: 8 // 原子爆弾（超広範囲・キノコ雲）
+    NUKE: 8, // 原子爆弾（超広範囲・キノコ雲）
+    HBOMB: 9 // 水素爆弾（原爆のさらに上・超巨大クレーター）
 };
 
 // Initial Inventory Order
-let INVENTORY = [BLOCKS.GRASS, BLOCKS.STONE, BLOCKS.WOOD, BLOCKS.LEAVES, BLOCKS.TNT, BLOCKS.MEGA_TNT, BLOCKS.NUKE, BLOCKS.FLINT, BLOCKS.WATER, BLOCKS.TNT_LAUNCHER, BLOCKS.ROCKET_LAUNCHER];
+let INVENTORY = [BLOCKS.GRASS, BLOCKS.STONE, BLOCKS.WOOD, BLOCKS.LEAVES, BLOCKS.TNT, BLOCKS.MEGA_TNT, BLOCKS.NUKE, BLOCKS.HBOMB, BLOCKS.FLINT, BLOCKS.WATER, BLOCKS.TNT_LAUNCHER, BLOCKS.ROCKET_LAUNCHER];
 let selectedItemIndex = 0;
 let swapSourceIndex = -1;
 
@@ -51,6 +55,9 @@ let rocketPower = 5;
 // 原子爆弾の威力（爆発半径・10〜50）
 let nukePower = 30;
 
+// 水素爆弾の威力（爆発半径・30〜70）
+let hbombPower = 50;
+
 const BLOCK_PROPS = {
     [BLOCKS.GRASS]: { color: 0x795548, sound: 'soft' },
     [BLOCKS.STONE]: { color: 0x9E9E9E, sound: 'hard' },
@@ -59,6 +66,7 @@ const BLOCK_PROPS = {
     [BLOCKS.TNT]: { color: 0xD32F2F, sound: 'soft' },
     [BLOCKS.MEGA_TNT]: { color: 0x4A148C, sound: 'soft' }, // 紫色の超強力TNT
     [BLOCKS.NUKE]: { color: 0xFFD600, sound: 'soft' }, // 原子爆弾（放射能イエロー）
+    [BLOCKS.HBOMB]: { color: 0xFF3D00, sound: 'soft' }, // 水素爆弾（赤橙）
     [BLOCKS.WATER]: { color: 0x2196F3, sound: 'water', transparent: true, opacity: 0.6, noCollide: true },
     [BLOCKS.BEDROCK]: { color: 0x000000, sound: 'hard' },
     [BLOCKS.FLINT]: { isTool: true },

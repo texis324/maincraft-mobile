@@ -32,6 +32,42 @@ if (nukePowerSlider) {
         document.getElementById('nuke-power-value').textContent = nukePower;
     });
 }
+const hbombPowerSlider = document.getElementById('hbomb-power');
+if (hbombPowerSlider) {
+    hbombPowerSlider.addEventListener('input', (e) => {
+        hbombPower = parseInt(e.target.value);
+        document.getElementById('hbomb-power-value').textContent = hbombPower;
+    });
+}
+
+// マップ設定スライダー（値表示のみ。実反映は「再生成」ボタン）
+const mapSizeSlider = document.getElementById('map-size');
+const mapDepthSlider = document.getElementById('map-depth');
+if (mapSizeSlider) {
+    mapSizeSlider.addEventListener('input', (e) => {
+        document.getElementById('map-size-value').textContent = e.target.value;
+    });
+}
+if (mapDepthSlider) {
+    mapDepthSlider.addEventListener('input', (e) => {
+        document.getElementById('map-depth-value').textContent = e.target.value;
+    });
+}
+const regenBtn = document.getElementById('btn-regenerate');
+if (regenBtn) {
+    regenBtn.addEventListener('click', () => {
+        WORLD_SIZE = parseInt(mapSizeSlider.value);
+        WORLD_DEPTH = parseInt(mapDepthSlider.value);
+        regenerateWorld();
+        // 再生成後はゲームに戻す
+        if (isMobileDevice) {
+            isPaused = false;
+            document.getElementById('pause-menu').style.display = 'none';
+        } else {
+            safeRequestPointerLock();
+        }
+    });
+}
 
 // Prevent click-through on UI
 const stopProp = (e) => e.stopPropagation();
@@ -103,6 +139,14 @@ document.addEventListener('keydown', (event) => {
         if (event.code === 'Digit8') setSlot(7);
         if (event.code === 'Digit9') setSlot(8);
         if (event.code === 'Digit0') setSlot(9);
+
+        // Gキーで空爆要請（上空から爆弾の雨）
+        if (event.code === 'KeyG' && !event.repeat) {
+            if (performance.now() - lastActionTime > 500) {
+                callAirstrike();
+                lastActionTime = performance.now();
+            }
+        }
 
         // Cキーで銃を発射
         if (event.code === 'KeyC') {

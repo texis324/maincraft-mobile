@@ -11,13 +11,18 @@ function disposePrimedTNTMesh(mesh) {
     }
 }
 
-function createPrimedTNT(x, y, z, velocity, isMega = false, isNuke = false) {
+// bombKind: null(通常) | 'nuke'(原爆) | 'hbomb'(水爆)。impactDetonate: 空爆＝着弾で爆発
+function createPrimedTNT(x, y, z, velocity, isMega = false, bombKind = null, impactDetonate = false) {
     // Remove block if it exists
     removeBlock(x, y, z);
 
     const geometry = new THREE.BoxGeometry(0.98, 0.98, 0.98); // Slightly smaller
     // Clone materials for flashing
-    let mat = materials[isNuke ? BLOCKS.NUKE : (isMega ? BLOCKS.MEGA_TNT : BLOCKS.TNT)];
+    let matType = BLOCKS.TNT;
+    if (bombKind === 'nuke') matType = BLOCKS.NUKE;
+    else if (bombKind === 'hbomb') matType = BLOCKS.HBOMB;
+    else if (isMega) matType = BLOCKS.MEGA_TNT;
+    let mat = materials[matType];
     if(Array.isArray(mat)) mat = mat.map(m => m.clone());
     else mat = mat.clone();
 
@@ -27,27 +32,29 @@ function createPrimedTNT(x, y, z, velocity, isMega = false, isNuke = false) {
     scene.add(mesh);
 
     // Add slight randomness to fuse so they don't explode all at once in a stack
-    // MEGA TNTは少し長め、原爆はさらに長め（逃げる/飛んで眺める時間）
+    // MEGA TNTは少し長め、原爆/水爆はさらに長め（逃げる/飛んで眺める時間）
     let fuse = 3.0 + Math.random() * 0.5;
-    if (isNuke) fuse = 5.0 + Math.random() * 0.5;
+    if (bombKind) fuse = 5.0 + Math.random() * 0.5;
     else if (isMega) fuse = 4.0 + Math.random() * 0.5;
+    if (impactDetonate) fuse = 999; // 空爆は時間でなく着弾で爆発
 
     primedTNTs.push({
         mesh: mesh,
         velocity: velocity || new THREE.Vector3(0, 0, 0),
         fuse: fuse,
         flashTimer: 0,
-        isMega: isMega, // MEGA TNTかどうかのフラグ
-        isNuke: isNuke, // 原子爆弾かどうかのフラグ
-        grounded: false // 接地フラグ
+        isMega: isMega,            // MEGA TNTかどうか
+        bombKind: bombKind,        // 'nuke' / 'hbomb' / null
+        impactDetonate: impactDetonate, // 着弾起爆（空爆）
+        grounded: false            // 接地フラグ
     });
 }
 
-function igniteTNT(x, y, z, velocity, isMega = false, isNuke = false) {
+function igniteTNT(x, y, z, velocity, isMega = false, bombKind = null) {
     playSound('ignite');
     // Default small hop if triggered by player
     const initialVel = velocity || new THREE.Vector3((Math.random()-0.5)*0.2, 0.3, (Math.random()-0.5)*0.2);
-    createPrimedTNT(x, y, z, initialVel, isMega, isNuke);
+    createPrimedTNT(x, y, z, initialVel, isMega, bombKind);
 }
 
 function updatePrimedTNTs(delta) {
@@ -112,8 +119,11 @@ function updatePrimedTNTs(delta) {
 
             // TNTの底面が地面の上面より下なら衝突
             if (tntBottomY <= groundTopY) {
-                // 速度が小さければ完全に停止
-                if (Math.abs(tnt.velocity.y) < 3) {
+                if (tnt.impactDetonate) {
+                    // 空爆＝着弾した瞬間に爆発
+                    tnt.fuse = 0;
+                } else if (Math.abs(tnt.velocity.y) < 3) {
+                    // 速度が小さければ完全に停止
                     tnt.velocity.y = 0;
                     tnt.velocity.x *= 0.3;
                     tnt.velocity.z *= 0.3;
@@ -170,7 +180,7 @@ function updatePrimedTNTs(delta) {
         }
 
         if (tnt.fuse <= 0) {
-            explode(tnt.mesh.position.x, tnt.mesh.position.y, tnt.mesh.position.z, tnt.isMega, null, tnt.isNuke);
+            explode(tnt.mesh.position.x, tnt.mesh.position.y, tnt.mesh.position.z, tnt.isMega, null, tnt.bombKind);
             scene.remove(tnt.mesh);
             disposePrimedTNTMesh(tnt.mesh); // 複製したジオメトリ・マテリアルを破棄
             primedTNTs.splice(i, 1);
@@ -261,64 +271,122 @@ function updateRockets(delta) {
     }
 }
 
-function explode(cx, cy, cz, isMega = false, customRadius = null, isNuke = false) {
-    // 原子爆弾は専用の演出（ホワイトフラッシュ・キノコ雲・画面揺れ・重低音）
-    if (isNuke) {
+// --- 空爆（カーペットボミング）。上空から爆弾を降らせて着弾爆発 ---
+function callAirstrike() {
+    const dir = new THREE.Vector3();
+    camera.getWorldDirection(dir);
+    dir.y = 0;
+    if (dir.lengthSq() < 0.001) dir.set(0, 0, -1);
+    dir.normalize();
+    const right = new THREE.Vector3(-dir.z, 0, dir.x); // 進行方向の横
+    const startAhead = 6;          // プレイヤーの少し前から
+    const spacing = 4;             // 爆弾の前後間隔
+    const count = 12;              // 爆弾数
+    const dropY = SURFACE_Y + 45;  // 上空から投下
+    const base = camera.position.clone();
+    playSound('shoot');
+    for (let i = 0; i < count; i++) {
+        const along = startAhead + i * spacing;
+        const lateral = (Math.random() - 0.5) * 4;
+        const px = base.x + dir.x * along + right.x * lateral;
+        const pz = base.z + dir.z * along + right.z * lateral;
+        // 少しずつ時間差で投下（落下→着弾で爆発）
+        setTimeout(() => {
+            createPrimedTNT(px, dropY, pz,
+                new THREE.Vector3((Math.random() - 0.5), -8, (Math.random() - 0.5)),
+                false, null, true); // impactDetonate
+        }, i * 110);
+    }
+}
+
+// bombKind: null | 'nuke' | 'hbomb'
+function explode(cx, cy, cz, isMega = false, customRadius = null, bombKind = null) {
+    const isBomb = (bombKind === 'nuke' || bombKind === 'hbomb');
+
+    // 原爆/水爆は専用の演出（ホワイトフラッシュ・キノコ雲・画面揺れ・重低音）
+    if (isBomb) {
         playSound('nuke');
         triggerNukeFlash();
-        nukeScreenShake();
+        if (bombKind === 'hbomb') {
+            setTimeout(triggerNukeFlash, 130); // 二段フラッシュ
+            nukeScreenShake(1.3, 0.09);
+        } else {
+            nukeScreenShake();
+        }
     } else {
         playSound('explode');
     }
 
-    // 半径: 原爆 > customRadius > MEGA(8) > 通常(4)
-    const radius = isNuke ? nukePower : (customRadius !== null ? customRadius : (isMega ? 8 : 4));
-    const particleCount = isNuke ? 140 : (isMega ? 60 : 30);
-    const particleSize = isNuke ? 0.8 : (isMega ? 0.6 : 0.4);
-    createBlockParticles(cx, cy, cz, isNuke ? BLOCKS.NUKE : (isMega ? BLOCKS.MEGA_TNT : BLOCKS.TNT), particleCount, particleSize);
-    if (isNuke) createMushroomCloud(cx, cy, cz, radius);
+    // 半径: 水爆 > 原爆 > customRadius > MEGA(8) > 通常(4)
+    let radius;
+    if (bombKind === 'hbomb') radius = hbombPower;
+    else if (bombKind === 'nuke') radius = nukePower;
+    else radius = customRadius !== null ? customRadius : (isMega ? 8 : 4);
 
-    // Affect blocks and other TNTs
-    for(let x = Math.floor(cx - radius); x <= Math.ceil(cx + radius); x++) {
-        for(let y = Math.floor(cy - radius); y <= Math.ceil(cy + radius); y++) {
-            for(let z = Math.floor(cz - radius); z <= Math.ceil(cz + radius); z++) {
-                const dist = Math.sqrt((x-cx)**2 + (y-cy)**2 + (z-cz)**2);
-                if(dist <= radius) {
-                    const key = getKey(x,y,z);
+    const particleCount = isBomb ? (bombKind === 'hbomb' ? 220 : 140) : (isMega ? 60 : 30);
+    const particleSize = isBomb ? 0.9 : (isMega ? 0.6 : 0.4);
+    const particleType = bombKind === 'hbomb' ? BLOCKS.HBOMB : (bombKind === 'nuke' ? BLOCKS.NUKE : (isMega ? BLOCKS.MEGA_TNT : BLOCKS.TNT));
+    createBlockParticles(cx, cy, cz, particleType, particleCount, particleSize);
+    if (isBomb) createMushroomCloud(cx, cy, cz, radius);
 
-                    // Check for block
-                    if(blockData[key] && blockData[key] !== BLOCKS.BEDROCK) {
-                        if (blockData[key] === BLOCKS.TNT) {
-                            // Propel TNT
-                            const dx = x - cx;
-                            const dy = y - cy;
-                            const dz = z - cz;
-                            // Normalized direction * force (MEGA/原爆はより強い力)
-                            const force = (1 - dist / radius) * (isNuke ? 40 : (isMega ? 30 : 20));
-                            const velocity = new THREE.Vector3(dx, dy + 0.5, dz).normalize().multiplyScalar(force);
+    // --- 地形を球状にえぐる（深さ対応・サーフェスカリング向けに二段処理） ---
+    // 掘る深さは爆心から最大30まで（岩盤は残す）。深いマップで底まで掘って激重になるのを防ぐ
+    const bottomY = Math.max(worldBottomY + 1, Math.floor(cy) - Math.min(radius, 30));
+    const R = radius, R2 = R * R;
+    function inBlast(x, y, z) {
+        if (y < bottomY) return false;
+        return ((x - cx) ** 2 + (y - cy) ** 2 + (z - cz) ** 2) <= R2;
+    }
+    const revealSet = new Set();
+    const chainForce = bombKind ? 40 : (isMega ? 30 : 20);
+    const x0 = Math.floor(cx - R), x1 = Math.ceil(cx + R);
+    const y0 = Math.max(bottomY, Math.floor(cy - R));
+    // Y上限は地表（または爆心）の少し上まで。広大な空中セルを総当たりしない＝重い爆弾の高速化
+    const y1 = Math.min(Math.ceil(cy + R), Math.max(SURFACE_Y, Math.ceil(cy)) + 8);
+    const z0 = Math.floor(cz - R), z1 = Math.ceil(cz + R);
+    for (let x = x0; x <= x1; x++) {
+        for (let y = y0; y <= y1; y++) {
+            for (let z = z0; z <= z1; z++) {
+                if (!inBlast(x, y, z)) continue;
+                const key = getKey(x, y, z);
+                const t = blockData[key];
+                if (!t || t === BLOCKS.BEDROCK) continue;
 
-                            igniteTNT(x, y, z, velocity, false);
-                        } else if (blockData[key] === BLOCKS.MEGA_TNT) {
-                            // MEGA TNTの誘爆
-                            const dx = x - cx;
-                            const dy = y - cy;
-                            const dz = z - cz;
-                            const force = (1 - dist / radius) * (isNuke ? 45 : (isMega ? 35 : 25));
-                            const velocity = new THREE.Vector3(dx, dy + 0.5, dz).normalize().multiplyScalar(force);
-
-                            igniteTNT(x, y, z, velocity, true); // MEGA TNTとして点火
-                        } else {
-                            if(Math.random() < 0.3) createBlockParticles(x, y, z, blockData[key], 2, 0.15);
-                            removeBlock(x, y, z);
-                        }
-                    }
+                // 爆薬系は誘爆（連鎖）
+                if (t === BLOCKS.TNT || t === BLOCKS.MEGA_TNT || t === BLOCKS.NUKE || t === BLOCKS.HBOMB) {
+                    const dx = x - cx, dy = y - cy, dz = z - cz;
+                    const dist = Math.sqrt(dx*dx + dy*dy + dz*dz) || 0.001;
+                    const f = (1 - dist / R) * chainForce + 4;
+                    const vel = new THREE.Vector3(dx, dy + 0.5, dz).normalize().multiplyScalar(f);
+                    const childKind = t === BLOCKS.NUKE ? 'nuke' : (t === BLOCKS.HBOMB ? 'hbomb' : null);
+                    igniteTNT(x, y, z, vel, t === BLOCKS.MEGA_TNT, childKind);
+                    continue;
                 }
+
+                // 殻になる隣（爆破範囲外で固体）を後でまとめて再メッシュ
+                if (!inBlast(x + 1, y, z)) revealSet.add(getKey(x + 1, y, z));
+                if (!inBlast(x - 1, y, z)) revealSet.add(getKey(x - 1, y, z));
+                if (!inBlast(x, y + 1, z)) revealSet.add(getKey(x, y + 1, z));
+                if (!inBlast(x, y - 1, z)) revealSet.add(getKey(x, y - 1, z));
+                if (!inBlast(x, y, z + 1)) revealSet.add(getKey(x, y, z + 1));
+                if (!inBlast(x, y, z - 1)) revealSet.add(getKey(x, y, z - 1));
+                // 破片パーティクルは見える地表付近だけ（地下に数千個作る無駄を回避）
+                if (y >= SURFACE_Y - 2 && Math.random() < (isBomb ? 0.06 : 0.3)) {
+                    createBlockParticles(x, y, z, t, 2, 0.15);
+                }
+                removeBlock(x, y, z, true); // skipReveal（一括処理）
             }
         }
     }
+    // クレーターの壁を一括で再メッシュ（埋没していたブロックが露出した分）
+    for (const key of revealSet) {
+        if (chunks[key] || !blockData[key]) continue;
+        const parts = key.split(',');
+        revealIfNeeded(+parts[0], +parts[1], +parts[2]);
+    }
 
     // Also push existing Primed TNTs (着火済みTNTを吹き飛ばす)
-    const pushForceMultiplier = isNuke ? 70 : (isMega ? 45 : 30);
+    const pushForceMultiplier = isBomb ? (bombKind === 'hbomb' ? 90 : 70) : (isMega ? 45 : 30);
     for(let i=0; i<primedTNTs.length; i++) {
         const tnt = primedTNTs[i];
         const dist = tnt.mesh.position.distanceTo(new THREE.Vector3(cx, cy, cz));
@@ -333,11 +401,11 @@ function explode(cx, cy, cz, isMega = false, customRadius = null, isNuke = false
     }
 
     const distToPlayer = camera.position.distanceTo(new THREE.Vector3(cx, cy, cz));
-    // MEGA/原爆はより広い範囲でダメージ、より大きなダメージとノックバック
-    // （原爆は即死級。ただしポーズメニューの「ダメージ無効」ONなら死なない）
-    const damageRadius = isNuke ? radius * 1.3 : (isMega ? radius * 2.5 : radius * 2);
-    const maxDamage = isNuke ? 9999 : (isMega ? 120 : 80);
-    const knockbackForce = isNuke ? 80 : (isMega ? 50 : 30);
+    // MEGA/原爆/水爆はより広い範囲・大ダメージ・大ノックバック
+    // （原爆/水爆は即死級。ただしポーズメニューの「ダメージ無効」ONなら死なない）
+    const damageRadius = isBomb ? radius * 1.3 : (isMega ? radius * 2.5 : radius * 2);
+    const maxDamage = isBomb ? 9999 : (isMega ? 120 : 80);
+    const knockbackForce = isBomb ? (bombKind === 'hbomb' ? 100 : 80) : (isMega ? 50 : 30);
     if(distToPlayer < damageRadius) {
         const damage = Math.floor((1 - (distToPlayer / damageRadius)) * maxDamage);
         takeDamage(damage);
