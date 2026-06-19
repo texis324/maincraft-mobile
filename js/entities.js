@@ -611,7 +611,7 @@ function nukeScreenShake(duration = 0.9, intensity = 0.06) {
 const smokeParticles = [];
 function spawnSmoke(x, y, z, color, size, vel, life, grow, buoy) {
     // 病的な肥大の保険: 上限超過なら最古を捨てる（共有geo/材質なので dispose 不要）
-    if (smokeParticles.length >= 2200) {
+    if (smokeParticles.length >= 3000) {
         const old = smokeParticles.shift();
         if (old) scene.remove(old);
     }
@@ -635,7 +635,7 @@ function createMushroomCloud(cx, cy, cz, radius) {
         const r = Math.random() * radius * 0.4;
         const vel = new THREE.Vector3(Math.cos(a) * (2 + Math.random() * 6), 2 + Math.random() * 5, Math.sin(a) * (2 + Math.random() * 6));
         spawnSmoke(cx + Math.cos(a) * r, cy + Math.random() * 2, cz + Math.sin(a) * r,
-            fire[i % fire.length], 1.2 + Math.random() * 1.5, vel, 0.7 + Math.random() * 0.5, 2.0, 4.0);
+            fire[i % fire.length], 1.2 + Math.random() * 1.5, vel, 1.0 + Math.random() * 0.8, 2.0, 4.0);
     }
 
     // 茎（立ち上る煙の柱）
@@ -647,7 +647,7 @@ function createMushroomCloud(cx, cy, cz, radius) {
         const rr = (0.6 + t * 0.8) * (1 + Math.random());
         const vel = new THREE.Vector3((Math.random() - 0.5) * 1.5, 4 + Math.random() * 4, (Math.random() - 0.5) * 1.5);
         spawnSmoke(cx + Math.cos(swirl) * rr, y, cz + Math.sin(swirl) * rr,
-            smoke[i % smoke.length], 1.5 + Math.random() * 1.5, vel, 2.5 + Math.random() * 1.5, 0.8, 3.5);
+            smoke[i % smoke.length], 1.5 + Math.random() * 1.5, vel, 10 + Math.random() * 6, 0.35, 2.2);
     }
 
     // 傘（上部でドーム状に外へ広がる）
@@ -659,7 +659,7 @@ function createMushroomCloud(cx, cy, cz, radius) {
         const dome = Math.cos((r / capR) * Math.PI / 2) * capR * 0.5;
         const vel = new THREE.Vector3(Math.cos(a) * (2 + r * 0.3), 1 + Math.random() * 2, Math.sin(a) * (2 + r * 0.3));
         spawnSmoke(cx + Math.cos(a) * r, capY + dome + (Math.random() - 0.5) * 2, cz + Math.sin(a) * r,
-            smoke[i % smoke.length], 2.0 + Math.random() * 2.0, vel, 3.0 + Math.random() * 1.5, 1.2, 1.5);
+            smoke[i % smoke.length], 2.0 + Math.random() * 2.0, vel, 14 + Math.random() * 7, 0.5, 1.0);
     }
 }
 
