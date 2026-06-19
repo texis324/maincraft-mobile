@@ -56,33 +56,28 @@ function getBreakDelay() {
     return BREAK_DELAY;
 }
 
-function attemptMine(screenX, screenY) {
-    // スクリーン座標が指定されていればそこを、なければ画面中央を使用
-    let raycastCoords = new THREE.Vector2(0, 0);
+// スクリーン座標（未指定なら画面中央）からカメラ光線を作り、ボクセル DDA で最初のブロックを返す。
+// メッシュ非依存（チャンクメッシュ化に対応）。reach=5。
+const _pickCoords = new THREE.Vector2();
+function pickBlock(screenX, screenY) {
+    _pickCoords.set(0, 0);
     if (screenX !== undefined && screenY !== undefined) {
-        raycastCoords.x = (screenX / window.innerWidth) * 2 - 1;
-        raycastCoords.y = -(screenY / window.innerHeight) * 2 + 1;
+        _pickCoords.x = (screenX / window.innerWidth) * 2 - 1;
+        _pickCoords.y = -(screenY / window.innerHeight) * 2 + 1;
     }
+    raycaster.setFromCamera(_pickCoords, camera);
+    return voxelRaycast(raycaster.ray.origin, raycaster.ray.direction, 5, true);
+}
 
-    raycaster.setFromCamera(raycastCoords, camera);
-    // 地形ブロックのみを対象にする（銃モデルやパーティクル等を除外）
-    const intersects = raycaster.intersectObjects(blockMeshes, false);
+function attemptMine(screenX, screenY) {
+    const hit = pickBlock(screenX, screenY);
+    if (!hit) return;
 
-    if (intersects.length > 0) {
-        const intersect = intersects[0];
-        if (intersect.distance > 5) return;
-
-        const obj = intersect.object;
-        const type = obj.userData.type;
-        const bx = obj.userData.x;
-        const by = obj.userData.y;
-        const bz = obj.userData.z;
-
-        if (type && type !== BLOCKS.BEDROCK) {
-            playSound('break', type);
-            createBlockParticles(bx, by, bz, type, 5, 0.15);
-            removeBlock(bx, by, bz);
-        }
+    const type = hit.type;
+    if (type && type !== BLOCKS.BEDROCK) {
+        playSound('break', type);
+        createBlockParticles(hit.x, hit.y, hit.z, type, 5, 0.15);
+        removeBlock(hit.x, hit.y, hit.z);
     }
 }
 
@@ -119,57 +114,40 @@ function attemptPlaceOrIgnite(screenX, screenY) {
         return;
     }
 
-    // スクリーン座標が指定されていればそこを、なければ画面中央を使用
-    let raycastCoords = new THREE.Vector2(0, 0);
-    if (screenX !== undefined && screenY !== undefined) {
-        raycastCoords.x = (screenX / window.innerWidth) * 2 - 1;
-        raycastCoords.y = -(screenY / window.innerHeight) * 2 + 1;
-    }
+    const hit = pickBlock(screenX, screenY);
 
-    raycaster.setFromCamera(raycastCoords, camera);
-    // 地形ブロックのみを対象にする
-    const intersects = raycaster.intersectObjects(blockMeshes, false);
-
-    if (intersects.length > 0) {
-        const intersect = intersects[0];
-        if (intersect.distance > 5) return;
-
-        const obj = intersect.object;
-        const type = obj.userData.type;
+    if (hit) {
+        const type = hit.type;
 
         // 通常TNTの点火
         if (currentItem === BLOCKS.FLINT && type === BLOCKS.TNT) {
-            igniteTNT(obj.userData.x, obj.userData.y, obj.userData.z, null, false);
+            igniteTNT(hit.x, hit.y, hit.z, null, false);
             return;
         }
 
         // MEGA TNTの点火
         if (currentItem === BLOCKS.FLINT && type === BLOCKS.MEGA_TNT) {
-            igniteTNT(obj.userData.x, obj.userData.y, obj.userData.z, null, true);
+            igniteTNT(hit.x, hit.y, hit.z, null, true);
             return;
         }
 
         // 原子爆弾の点火
         if (currentItem === BLOCKS.FLINT && type === BLOCKS.NUKE) {
-            igniteTNT(obj.userData.x, obj.userData.y, obj.userData.z, null, false, 'nuke');
+            igniteTNT(hit.x, hit.y, hit.z, null, false, 'nuke');
             return;
         }
 
         // 水素爆弾の点火
         if (currentItem === BLOCKS.FLINT && type === BLOCKS.HBOMB) {
-            igniteTNT(obj.userData.x, obj.userData.y, obj.userData.z, null, false, 'hbomb');
+            igniteTNT(hit.x, hit.y, hit.z, null, false, 'hbomb');
             return;
         }
 
         if (BLOCK_PROPS[currentItem].isTool) return;
 
-        const nx = Math.round(intersect.face.normal.x);
-        const ny = Math.round(intersect.face.normal.y);
-        const nz = Math.round(intersect.face.normal.z);
-
-        const bnx = obj.userData.x + nx;
-        const bny = obj.userData.y + ny;
-        const bnz = obj.userData.z + nz;
+        const bnx = hit.x + hit.nx;
+        const bny = hit.y + hit.ny;
+        const bnz = hit.z + hit.nz;
 
         const playerPos = camera.position;
 

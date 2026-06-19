@@ -49,6 +49,9 @@ function animate() {
         return;
     }
 
+    // 念のため未反映の dirty チャンクをこのフレームで構築（通常は各操作/爆破で即時 flush 済み）
+    flushDirtyChunks();
+
     // Game Logic
     if (isLeftMouseDown && time - lastActionTime > getBreakDelay()) {
         attemptMine();

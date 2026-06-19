@@ -1,9 +1,6 @@
 // --- 2. Graphics & Texture Generation ---
-function createTexture(type) {
-    const canvas = document.createElement('canvas');
-    canvas.width = 64; canvas.height = 64;
-    const ctx = canvas.getContext('2d');
-
+// 64x64 の ctx に 1 タイル分を描画する（アトラス焼き込みと createTexture の共通処理）
+function paintTile(ctx, type) {
     // Simple pixel art procedural generation
     if (type === 'grass_side') {
         ctx.fillStyle = '#795548'; ctx.fillRect(0,0,64,64);
@@ -137,7 +134,13 @@ function createTexture(type) {
         ctx.beginPath(); ctx.moveTo(6, 10); ctx.lineTo(14, 18); ctx.lineTo(6, 16); ctx.closePath(); ctx.fill();
         ctx.restore();
     }
+}
 
+function createTexture(type) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 64; canvas.height = 64;
+    const ctx = canvas.getContext('2d');
+    paintTile(ctx, type);
     const tex = new THREE.CanvasTexture(canvas);
     tex.magFilter = THREE.NearestFilter;
     return tex;
@@ -253,6 +256,85 @@ function initMaterials() {
     materials[BLOCKS.WATER] = new THREE.MeshLambertMaterial({ map: water, transparent: true, opacity: 0.6, side: THREE.DoubleSide });
     materials[BLOCKS.BEDROCK] = new THREE.MeshLambertMaterial({ map: bedrock });
 
+    initAtlas(); // チャンクメッシュ用のテクスチャアトラスと共有マテリアルを構築
+
     updateUI();
     updateHearts();
+}
+
+// ============================================================
+// テクスチャアトラス（チャンクメッシュ化用）
+// 全ブロック面を 1 枚のテクスチャに焼き、面ごとに UV を割り当てることで
+// 「1 ブロック = 1 マテリアル/メッシュ」をやめ、チャンク単位の 1 メッシュにまとめる。
+// 既存の materials[...]（6 面配列）は着火 TNT エンティティ等で引き続き使う。
+// ============================================================
+let atlasTexture = null;     // アトラスの THREE.Texture
+let solidMaterial = null;    // 不透明ブロック（葉含む）用の共有マテリアル
+let waterMaterial = null;    // 水（半透明）用の共有マテリアル
+const ATLAS_COLS = 8, ATLAS_ROWS = 4, TILE_PX = 64;       // 8x4=32 枠（実使用 17）。512x256＝2の冪
+const ATLAS_W = ATLAS_COLS * TILE_PX, ATLAS_H = ATLAS_ROWS * TILE_PX;
+const ATLAS_TILES = [
+    'grass_top', 'grass_side', 'dirt', 'stone', 'wood_side', 'wood_top', 'leaves',
+    'tnt_side', 'tnt_top', 'mega_tnt_side', 'mega_tnt_top', 'nuke_side', 'nuke_top',
+    'hbomb_side', 'hbomb_top', 'water', 'bedrock'
+];
+const ATLAS_INDEX = {};
+ATLAS_TILES.forEach((n, i) => { ATLAS_INDEX[n] = i; });
+
+// type -> { top, side, bottom } のアトラスタイル番号（initAtlas で確定）
+const BLOCK_TILE_IDX = {};
+
+// タイル番号 -> アトラス上の UV 矩形。NearestFilter のにじみ防止に半テクセル内側へ。
+// CanvasTexture は flipY=true（既定）なので V はキャンバス上端ほど 1 に近い。
+function tileUV(i) {
+    const col = i % ATLAS_COLS, row = Math.floor(i / ATLAS_COLS);
+    const px = col * TILE_PX, py = row * TILE_PX;
+    return {
+        u0: (px + 0.5) / ATLAS_W,
+        u1: (px + TILE_PX - 0.5) / ATLAS_W,
+        vTop: 1 - (py + 0.5) / ATLAS_H,           // キャンバス上端（テクスチャの上）
+        vBot: 1 - (py + TILE_PX - 0.5) / ATLAS_H  // キャンバス下端（テクスチャの下）
+    };
+}
+
+function initAtlas() {
+    if (atlasTexture) return;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = ATLAS_W; canvas.height = ATLAS_H;
+    const ctx = canvas.getContext('2d');
+
+    for (let i = 0; i < ATLAS_TILES.length; i++) {
+        const tile = document.createElement('canvas');
+        tile.width = 64; tile.height = 64;
+        paintTile(tile.getContext('2d'), ATLAS_TILES[i]);
+        const col = i % ATLAS_COLS, row = Math.floor(i / ATLAS_COLS);
+        ctx.drawImage(tile, col * TILE_PX, row * TILE_PX);
+    }
+
+    atlasTexture = new THREE.CanvasTexture(canvas);
+    atlasTexture.magFilter = THREE.NearestFilter;
+    atlasTexture.minFilter = THREE.NearestFilter;
+    atlasTexture.generateMipmaps = false;
+    atlasTexture.wrapS = THREE.ClampToEdgeWrapping;
+    atlasTexture.wrapT = THREE.ClampToEdgeWrapping;
+
+    solidMaterial = new THREE.MeshLambertMaterial({ map: atlasTexture });
+    // 水は半透明で奥の地形が透ける。depthWrite=false で重なり順を自然に。
+    waterMaterial = new THREE.MeshLambertMaterial({
+        map: atlasTexture, transparent: true, opacity: 0.6,
+        depthWrite: false, side: THREE.DoubleSide
+    });
+
+    const T = (name) => ATLAS_INDEX[name];
+    BLOCK_TILE_IDX[BLOCKS.GRASS]    = { top: T('grass_top'),    side: T('grass_side'),    bottom: T('dirt') };
+    BLOCK_TILE_IDX[BLOCKS.STONE]    = { top: T('stone'),        side: T('stone'),         bottom: T('stone') };
+    BLOCK_TILE_IDX[BLOCKS.WOOD]     = { top: T('wood_top'),     side: T('wood_side'),     bottom: T('wood_top') };
+    BLOCK_TILE_IDX[BLOCKS.LEAVES]   = { top: T('leaves'),       side: T('leaves'),        bottom: T('leaves') };
+    BLOCK_TILE_IDX[BLOCKS.TNT]      = { top: T('tnt_top'),      side: T('tnt_side'),      bottom: T('tnt_top') };
+    BLOCK_TILE_IDX[BLOCKS.MEGA_TNT] = { top: T('mega_tnt_top'), side: T('mega_tnt_side'), bottom: T('mega_tnt_top') };
+    BLOCK_TILE_IDX[BLOCKS.NUKE]     = { top: T('nuke_top'),     side: T('nuke_side'),     bottom: T('nuke_top') };
+    BLOCK_TILE_IDX[BLOCKS.HBOMB]    = { top: T('hbomb_top'),    side: T('hbomb_side'),    bottom: T('hbomb_top') };
+    BLOCK_TILE_IDX[BLOCKS.WATER]    = { top: T('water'),        side: T('water'),         bottom: T('water') };
+    BLOCK_TILE_IDX[BLOCKS.BEDROCK]  = { top: T('bedrock'),      side: T('bedrock'),       bottom: T('bedrock') };
 }

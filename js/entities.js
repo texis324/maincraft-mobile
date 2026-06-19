@@ -13,8 +13,10 @@ function disposePrimedTNTMesh(mesh) {
 
 // bombKind: null(通常) | 'nuke'(原爆) | 'hbomb'(水爆)。impactDetonate: 空爆＝着弾で爆発
 function createPrimedTNT(x, y, z, velocity, isMega = false, bombKind = null, impactDetonate = false) {
-    // Remove block if it exists
-    removeBlock(x, y, z);
+    // Remove block if it exists（defer=true: 爆発の連鎖誘爆ループ中に毎回フル flush するのを防ぐ。
+    // TNTエンティティのメッシュが同位置に即出るので見た目欠けは無く、未反映分は explode 末尾の
+    // flushDirtyChunks() か main.js の毎フレーム保険 flush で必ず構築される）
+    removeBlock(x, y, z, true);
 
     const geometry = new THREE.BoxGeometry(0.98, 0.98, 0.98); // Slightly smaller
     // Clone materials for flashing
@@ -235,16 +237,10 @@ function updateRockets(delta) {
 
         let hit = false;
 
-        // 衝突チェック（レイキャスト） - 地形ブロックのみを対象にする
+        // 衝突チェック（ボクセル DDA）: 移動した区間を前位置から走査し、すり抜けを防ぐ。水は通過。
         const rayDir = rocket.velocity.clone().normalize();
-        const rocketRay = new THREE.Raycaster(rocket.mesh.position, rayDir, 0, movement.length() + 0.2);
-        const intersects = rocketRay.intersectObjects(blockMeshes, false);
-        for (const intersect of intersects) {
-            const props = BLOCK_PROPS[intersect.object.userData.type];
-            if (props && props.noCollide) continue; // 水はすり抜ける
-            hit = true;
-            break;
-        }
+        const prevPos = rocket.mesh.position.clone().sub(movement);
+        if (voxelRaycast(prevPos, rayDir, movement.length() + 0.2, false)) hit = true;
 
         // ブロックとの直接衝突チェック
         const pos = rocket.mesh.position;
@@ -339,7 +335,6 @@ function explode(cx, cy, cz, isMega = false, customRadius = null, bombKind = nul
         if (y < bottomY) return false;
         return ((x - cx) ** 2 + (y - cy) ** 2 + (z - cz) ** 2) <= R2;
     }
-    const revealSet = new Set();
     const chainForce = bombKind ? 40 : (isMega ? 30 : 20);
     const x0 = Math.floor(cx - R), x1 = Math.ceil(cx + R);
     const y0 = Math.max(bottomY, Math.floor(cy - R));
@@ -365,27 +360,16 @@ function explode(cx, cy, cz, isMega = false, customRadius = null, bombKind = nul
                     continue;
                 }
 
-                // 殻になる隣（爆破範囲外で固体）を後でまとめて再メッシュ
-                if (!inBlast(x + 1, y, z)) revealSet.add(getKey(x + 1, y, z));
-                if (!inBlast(x - 1, y, z)) revealSet.add(getKey(x - 1, y, z));
-                if (!inBlast(x, y + 1, z)) revealSet.add(getKey(x, y + 1, z));
-                if (!inBlast(x, y - 1, z)) revealSet.add(getKey(x, y - 1, z));
-                if (!inBlast(x, y, z + 1)) revealSet.add(getKey(x, y, z + 1));
-                if (!inBlast(x, y, z - 1)) revealSet.add(getKey(x, y, z - 1));
                 // 破片パーティクルは見える地表付近だけ（地下に数千個作る無駄を回避）
                 if (y >= SURFACE_Y - 2 && Math.random() < (isBomb ? 0.06 : 0.3)) {
                     createBlockParticles(x, y, z, t, 2, 0.15);
                 }
-                removeBlock(x, y, z, true); // skipReveal（一括処理）
+                removeBlock(x, y, z, true); // defer（dirty 化のみ・後で一括再構築）
             }
         }
     }
-    // クレーターの壁を一括で再メッシュ（埋没していたブロックが露出した分）
-    for (const key of revealSet) {
-        if (chunks[key] || !blockData[key]) continue;
-        const parts = key.split(',');
-        revealIfNeeded(+parts[0], +parts[1], +parts[2]);
-    }
+    // クレーターに触れたチャンクをまとめて再構築（埋没ブロックの露出もここで反映される）
+    flushDirtyChunks();
 
     // Also push existing Primed TNTs (着火済みTNTを吹き飛ばす)
     const pushForceMultiplier = isBomb ? (bombKind === 'hbomb' ? 90 : 70) : (isMega ? 45 : 30);
@@ -746,17 +730,12 @@ function updateNukeMissiles(delta) {
             0.6, 1.0
         );
 
-        // 着弾判定（updateRockets を手本：レイキャスト＋直接セル＋境界）
+        // 着弾判定（updateRockets を手本：ボクセル DDA ＋直接セル＋境界）
         let hit = false;
         const pos = m.mesh.position;
         const rayDir = m.velocity.clone().normalize();
-        const ray = new THREE.Raycaster(pos.clone(), rayDir, 0, movement.length() + 0.3);
-        const intersects = ray.intersectObjects(blockMeshes, false);
-        for (const it of intersects) {
-            const props = BLOCK_PROPS[it.object.userData.type];
-            if (props && props.noCollide) continue;
-            hit = true; break;
-        }
+        const prevPos = pos.clone().sub(movement);
+        if (voxelRaycast(prevPos, rayDir, movement.length() + 0.3, false)) hit = true;
         const blockKey = getKey(Math.floor(pos.x), Math.floor(pos.y), Math.floor(pos.z));
         if (blockData[blockKey] && !BLOCK_PROPS[blockData[blockKey]]?.noCollide) hit = true;
         if (Math.abs(pos.x) > limit || Math.abs(pos.z) > limit || pos.y < 0 || pos.y > 80) hit = true;
