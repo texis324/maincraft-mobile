@@ -249,9 +249,9 @@ function updateRockets(delta) {
             hit = true;
         }
 
-        // ワールド境界チェック
+        // ワールド境界チェック（起伏/裂け目で地形は y<0 まで掘れるので、底は worldBottomY 基準）
         const limit = WORLD_SIZE / 2;
-        if (Math.abs(pos.x) > limit || Math.abs(pos.z) > limit || pos.y < 0 || pos.y > 50) {
+        if (Math.abs(pos.x) > limit || Math.abs(pos.z) > limit || pos.y < worldBottomY || pos.y > maxSurfaceY + 60) {
             hit = true;
         }
 
@@ -360,8 +360,9 @@ function explode(cx, cy, cz, isMega = false, customRadius = null, bombKind = nul
                     continue;
                 }
 
-                // 破片パーティクルは見える地表付近だけ（地下に数千個作る無駄を回避）
-                if (y >= SURFACE_Y - 2 && Math.random() < (isBomb ? 0.06 : 0.3)) {
+                // 破片パーティクルは見える地表付近だけ（地下に数千個作る無駄を回避）。
+                // 起伏地形では地表が y<0 の谷/裂け目にもなるので、爆心の高さも基準に含める。
+                if (y >= Math.min(SURFACE_Y, Math.floor(cy)) - 2 && Math.random() < (isBomb ? 0.06 : 0.3)) {
                     createBlockParticles(x, y, z, t, 2, 0.15);
                 }
                 removeBlock(x, y, z, true); // defer（dirty 化のみ・後で一括再構築）
@@ -738,7 +739,7 @@ function updateNukeMissiles(delta) {
         if (voxelRaycast(prevPos, rayDir, movement.length() + 0.3, false)) hit = true;
         const blockKey = getKey(Math.floor(pos.x), Math.floor(pos.y), Math.floor(pos.z));
         if (blockData[blockKey] && !BLOCK_PROPS[blockData[blockKey]]?.noCollide) hit = true;
-        if (Math.abs(pos.x) > limit || Math.abs(pos.z) > limit || pos.y < 0 || pos.y > 80) hit = true;
+        if (Math.abs(pos.x) > limit || Math.abs(pos.z) > limit || pos.y < worldBottomY || pos.y > maxSurfaceY + 90) hit = true;
         if (m.traveled > NUKE_MISSILE_MAX_RANGE) hit = true;
 
         // 単弾頭ミサイルは空中爆発(airburst): 降下中に「地表+H」で炸裂＝横に広く薙ぎ払う（被害最大化・MIRVは対象外）

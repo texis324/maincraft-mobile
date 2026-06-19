@@ -45,6 +45,7 @@ function saveSettings() {
             hbombPower: hbombPower,
             WORLD_SIZE: WORLD_SIZE,
             WORLD_DEPTH: WORLD_DEPTH,
+            worldSeed: worldSeed, // 同じ地形を再現するため（再生成で更新される）
             // スライダーの生 value（UI 復元用）
             sliders: {},
             invincible: (function() {
@@ -126,6 +127,8 @@ function loadSettings() {
     // 設置済みブロックが消える不一致が起きるため、適用済み値のみを世界生成に使う。
     if (typeof data.WORLD_SIZE === 'number') WORLD_SIZE = data.WORLD_SIZE;
     if (typeof data.WORLD_DEPTH === 'number') WORLD_DEPTH = data.WORLD_DEPTH;
+    // 保存した地形シードを復元（main.js の generateWorld より前＝同じ地形が再現される）
+    if (typeof data.worldSeed === 'number') worldSeed = data.worldSeed;
     // スライダー位置と値表示を、実際のワールドサイズに合わせる（ドラッグだけの未適用位置は捨てる）
     const msEl = persistGetEl('map-size');
     if (msEl) { msEl.value = WORLD_SIZE; const sp = persistGetEl('map-size-value'); if (sp) sp.textContent = WORLD_SIZE; }

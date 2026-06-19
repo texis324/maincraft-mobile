@@ -75,6 +75,48 @@ function paintTile(ctx, type) {
     } else if (type === 'bedrock') {
         ctx.fillStyle = '#212121'; ctx.fillRect(0,0,64,64);
         addNoise(ctx, 50);
+    } else if (type === 'sand') {
+        ctx.fillStyle = '#DBC68B'; ctx.fillRect(0,0,64,64);
+        addNoise(ctx, 14);
+    } else if (type === 'sandstone') {
+        ctx.fillStyle = '#CBB682'; ctx.fillRect(0,0,64,64);
+        // 水平な堆積層のライン
+        ctx.fillStyle = 'rgba(150,125,80,0.5)';
+        for (let y = 8; y < 64; y += 16) ctx.fillRect(0, y, 64, 2);
+        addNoise(ctx, 10);
+    } else if (type === 'granite') {
+        // 花崗岩＝ピンクがかった地に黒/白の斑点
+        ctx.fillStyle = '#9B6A53'; ctx.fillRect(0,0,64,64);
+        for (let i = 0; i < 60; i++) {
+            ctx.fillStyle = (i % 3 === 0) ? '#3a2a22' : '#cbb0a0';
+            const s = 2 + (i % 3);
+            ctx.fillRect((i * 37) % 62, (i * 53) % 62, s, s);
+        }
+        addNoise(ctx, 10);
+    } else if (type === 'diorite') {
+        // 閃緑岩＝白っぽい地に黒い斑点
+        ctx.fillStyle = '#CDCDCD'; ctx.fillRect(0,0,64,64);
+        for (let i = 0; i < 70; i++) {
+            ctx.fillStyle = (i % 2 === 0) ? '#5a5a5a' : '#f2f2f2';
+            const s = 2 + (i % 3);
+            ctx.fillRect((i * 29) % 62, (i * 47) % 62, s, s);
+        }
+        addNoise(ctx, 8);
+    } else if (type === 'andesite') {
+        // 安山岩＝灰色の地にやや暗い斑点
+        ctx.fillStyle = '#8C8C8C'; ctx.fillRect(0,0,64,64);
+        for (let i = 0; i < 60; i++) {
+            ctx.fillStyle = (i % 2 === 0) ? '#6f6f6f' : '#a6a6a6';
+            const s = 2 + (i % 3);
+            ctx.fillRect((i * 41) % 62, (i * 31) % 62, s, s);
+        }
+        addNoise(ctx, 8);
+    } else if (type === 'deepslate') {
+        // 深層岩＝暗い青灰色に縦のひび
+        ctx.fillStyle = '#4B4B52'; ctx.fillRect(0,0,64,64);
+        ctx.fillStyle = 'rgba(20,20,26,0.6)';
+        for (let i = 0; i < 5; i++) ctx.fillRect(6 + i * 13, 0, 2, 64);
+        addNoise(ctx, 16);
     } else if (type === 'flint') {
         ctx.fillStyle = '#555'; ctx.fillRect(0,0,64,64);
         ctx.fillStyle = '#CCC';
@@ -276,7 +318,9 @@ const ATLAS_W = ATLAS_COLS * TILE_PX, ATLAS_H = ATLAS_ROWS * TILE_PX;
 const ATLAS_TILES = [
     'grass_top', 'grass_side', 'dirt', 'stone', 'wood_side', 'wood_top', 'leaves',
     'tnt_side', 'tnt_top', 'mega_tnt_side', 'mega_tnt_top', 'nuke_side', 'nuke_top',
-    'hbomb_side', 'hbomb_top', 'water', 'bedrock'
+    'hbomb_side', 'hbomb_top', 'water', 'bedrock',
+    // 地層タイル（23枠・アトラスは8x4=32枠なので収まる）
+    'sand', 'sandstone', 'granite', 'diorite', 'andesite', 'deepslate'
 ];
 const ATLAS_INDEX = {};
 ATLAS_TILES.forEach((n, i) => { ATLAS_INDEX[n] = i; });
@@ -337,4 +381,12 @@ function initAtlas() {
     BLOCK_TILE_IDX[BLOCKS.HBOMB]    = { top: T('hbomb_top'),    side: T('hbomb_side'),    bottom: T('hbomb_top') };
     BLOCK_TILE_IDX[BLOCKS.WATER]    = { top: T('water'),        side: T('water'),         bottom: T('water') };
     BLOCK_TILE_IDX[BLOCKS.BEDROCK]  = { top: T('bedrock'),      side: T('bedrock'),       bottom: T('bedrock') };
+    // 地層ブロック（一様タイル＝上下側面同じ）
+    BLOCK_TILE_IDX[BLOCKS.DIRT]      = { top: T('dirt'),      side: T('dirt'),      bottom: T('dirt') };
+    BLOCK_TILE_IDX[BLOCKS.SAND]      = { top: T('sand'),      side: T('sand'),      bottom: T('sand') };
+    BLOCK_TILE_IDX[BLOCKS.SANDSTONE] = { top: T('sandstone'), side: T('sandstone'), bottom: T('sandstone') };
+    BLOCK_TILE_IDX[BLOCKS.GRANITE]   = { top: T('granite'),   side: T('granite'),   bottom: T('granite') };
+    BLOCK_TILE_IDX[BLOCKS.DIORITE]   = { top: T('diorite'),   side: T('diorite'),   bottom: T('diorite') };
+    BLOCK_TILE_IDX[BLOCKS.ANDESITE]  = { top: T('andesite'),  side: T('andesite'),  bottom: T('andesite') };
+    BLOCK_TILE_IDX[BLOCKS.DEEPSLATE] = { top: T('deepslate'), side: T('deepslate'), bottom: T('deepslate') };
 }

@@ -48,12 +48,19 @@ function togglePause() {
 // 将来、上向きの速度も変えたくなったらここに分岐を足すだけ（FLY_DIG_UP_DELAY）。
 const _digDirTmp = new THREE.Vector3();
 function getBreakDelay() {
+    let base = BREAK_DELAY;
     if (controls.isFlying) {
         camera.getWorldDirection(_digDirTmp);
-        if (_digDirTmp.y < -0.5) return FLY_DIG_DOWN_DELAY; // 視線が下向き＝下掘り＝速い
-        // 上向きを速くする時: if (_digDirTmp.y > 0.5) return FLY_DIG_UP_DELAY;
+        if (_digDirTmp.y < -0.5) base = FLY_DIG_DOWN_DELAY; // 視線が下向き＝下掘り＝速い
+        // 上向きを速くする時: if (_digDirTmp.y > 0.5) base = FLY_DIG_UP_DELAY;
     }
-    return BREAK_DELAY;
+    // 採掘対象ブロックの硬さでクールダウンを伸ばす（地層の石ほど遅い・既存ブロックは hardness 未設定＝等倍）
+    const hit = pickBlock();
+    if (hit) {
+        const p = BLOCK_PROPS[hit.type];
+        if (p && p.hardness) base = Math.round(base * p.hardness);
+    }
+    return base;
 }
 
 // スクリーン座標（未指定なら画面中央）からカメラ光線を作り、ボクセル DDA で最初のブロックを返す。

@@ -4,15 +4,15 @@ let stepTimer = 0;
 let frameCount = 0;
 let lastFpsTime = performance.now();
 
-// カメラ初期位置（ワールド中央の上空）
-camera.position.set(0, 6, 0);
-// 少し下を向く
+// カメラ初期向き（少し下を向く）。位置は generateWorld 後に地表へ合わせる。
 camera.rotation.x = -0.3;
 
 // 水に入っているかどうかの状態
 let wasInWater = false;
 
 generateWorld();
+// 起伏地形では地表高が一定でないので、乾いた陸地を探してスポーン
+spawnPlayer();
 
 function animate() {
     requestAnimationFrame(animate);

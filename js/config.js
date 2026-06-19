@@ -1,9 +1,18 @@
 // --- 1. Game Config & Performance Settings ---
 let WORLD_SIZE = 64;      // マップの一辺（再生成で変更可・スライダー 32〜128）
-let WORLD_DEPTH = 16;     // 地表より下に何層の石を生成するか（爆弾でクレーターを掘れる）
+let WORLD_DEPTH = 16;     // 最深部の地表より下に何層の石を生成するか（爆弾/裂け目で掘れる）
 let worldBottomY = -1;    // 岩盤の底のY（generateWorldで計算）
-const SURFACE_Y = 2;      // 地表（草/水）のY。岩盤の底=SURFACE_Y-1-WORLD_DEPTH
+const SURFACE_Y = 2;      // 基準の地表高（海面の高さでもある）。起伏はこの周辺に上下する
+const SEA_LEVEL = SURFACE_Y; // 海面。地表高がこれ未満の列は水で満たす（谷＝湖/海）
 const WORLD_HEIGHT = 8;
+
+// --- 起伏地形（手続き生成）のチューニング ---
+// バリューノイズは中央(0.5)寄りなので、ダイナミックな起伏には大きめの振幅が要る
+let TERRAIN_HILL_AMP = 9;    // 細かい丘の振幅（高周波）
+let TERRAIN_MTN_AMP = 18;   // 大きな起伏=山/谷の振幅（低周波）
+let TERRAIN_BASE = SEA_LEVEL + 7; // 平均的な陸の高さ（海面より上）＝大部分を陸地にし谷だけ湖に
+let worldSeed = 0;          // 0=未設定。generateWorld で乱数化（再生成で更新・persistで保存）
+let maxSurfaceY = SURFACE_Y; // 生成時に算出する最高地表Y（スポーン/カリング基準）
 const GRAVITY = 20.0;
 const JUMP_FORCE = 8.0;
 
@@ -46,7 +55,15 @@ const BLOCKS = {
     NUKE: 8, // 原子爆弾（超広範囲・キノコ雲）
     HBOMB: 9, // 水素爆弾（原爆のさらに上・超巨大クレーター）
     NUKE_MISSILE: 10, // 核ミサイル（単弾頭・右クリで発射）
-    MIRV_MISSILE: 11 // MIRV核ミサイル（飛行中に複数弾頭へ分裂）
+    MIRV_MISSILE: 11, // MIRV核ミサイル（飛行中に複数弾頭へ分裂）
+    // --- 地層用ブロック（ワールド生成専用・インベントリには出さない＝BEDROCKと同じ扱い） ---
+    DIRT: 12,       // 土（草の下）
+    SAND: 13,       // 砂（砂浜・浅瀬の底）
+    SANDSTONE: 14,  // 砂岩（砂の下）
+    GRANITE: 15,    // 花崗岩（石のポケット）
+    DIORITE: 16,    // 閃緑岩
+    ANDESITE: 17,   // 安山岩
+    DEEPSLATE: 18   // 深層岩（最深部・硬い）
 };
 
 // Initial Inventory Order
@@ -65,7 +82,15 @@ let hbombPower = 50;
 
 const BLOCK_PROPS = {
     [BLOCKS.GRASS]: { color: 0x795548, sound: 'soft' },
-    [BLOCKS.STONE]: { color: 0x9E9E9E, sound: 'hard' },
+    [BLOCKS.STONE]: { color: 0x9E9E9E, sound: 'hard', hardness: 1.0 },
+    // 地層ブロック（hardness=採掘クールダウン倍率。1.0=石と同じ・大きいほど遅い）
+    [BLOCKS.DIRT]:      { color: 0x795548, sound: 'soft', hardness: 0.6 },
+    [BLOCKS.SAND]:      { color: 0xDBC68B, sound: 'soft', hardness: 0.5 },
+    [BLOCKS.SANDSTONE]: { color: 0xCBB682, sound: 'hard', hardness: 0.9 },
+    [BLOCKS.GRANITE]:   { color: 0x9B6A53, sound: 'hard', hardness: 1.6 },
+    [BLOCKS.DIORITE]:   { color: 0xCDCDCD, sound: 'hard', hardness: 1.5 },
+    [BLOCKS.ANDESITE]:  { color: 0x8C8C8C, sound: 'hard', hardness: 1.5 },
+    [BLOCKS.DEEPSLATE]: { color: 0x4B4B52, sound: 'hard', hardness: 2.4 },
     [BLOCKS.WOOD]: { color: 0x5D4037, sound: 'wood' },
     [BLOCKS.LEAVES]: { color: 0x66BB6A, sound: 'soft' },
     [BLOCKS.TNT]: { color: 0xD32F2F, sound: 'soft' },

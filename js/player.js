@@ -18,8 +18,8 @@ function takeDamage(amount) {
 
 // Reset Player
 function resetPlayer() {
-    camera.position.set(0, 5, 0);
-    controls.velocity.set(0, 0, 0);
+    // 起伏地形では (0,5,0) 固定だと地中に埋まる/落下する。乾いた陸地を探して配置。
+    spawnPlayer(); // camera.position 設定 + velocity ゼロ化
     controls.isFlying = false;
     document.getElementById('fly-mode-indicator').style.display = 'none';
     playerHP = 100;
