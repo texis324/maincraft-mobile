@@ -71,6 +71,7 @@ let _editSaveTimer = null;
 
 function saveEditsToStore() {
     try {
+        if (window.__selfTesting) return;           // 自己テスト中はlocalStorageを汚さない
         if (typeof editsByChunk === 'undefined') return;
         const pcx = Math.floor(camera.position.x / 16), pcz = Math.floor(camera.position.z / 16);
         const cks = Object.keys(editsByChunk);
@@ -97,6 +98,7 @@ function saveEditsToStore() {
 
 // 連続改変(採掘/爆破)で毎回保存しないようデバウンス。setBlock から呼ばれる。
 function scheduleEditSave() {
+    if (window.__selfTesting) return;               // 自己テスト中は保存しない
     if (_editSaveTimer) clearTimeout(_editSaveTimer);
     _editSaveTimer = setTimeout(saveEditsToStore, 1500);
 }
