@@ -292,6 +292,7 @@ function callAirstrike() {
         const pz = base.z + dir.z * along + right.z * lateral;
         // 少しずつ時間差で投下（落下→着弾で爆発）
         setTimeout(() => {
+            playSound('whistle'); // 落下開始の瞬間に「ヒューーン」
             createPrimedTNT(px, dropY, pz,
                 new THREE.Vector3((Math.random() - 0.5), -8, (Math.random() - 0.5)),
                 false, null, true); // impactDetonate
@@ -514,6 +515,11 @@ function nukeScreenShake(duration = 0.9, intensity = 0.06) {
 // キノコ雲（火球 + 立ち上る茎 + 上部で広がる傘）。ボクセル風の煙キューブ。
 const smokeParticles = [];
 function spawnSmoke(x, y, z, color, size, vel, life, grow, buoy) {
+    // 病的な肥大の保険: 上限超過なら最古を捨てる（共有geo/材質なので dispose 不要）
+    if (smokeParticles.length >= 2200) {
+        const old = smokeParticles.shift();
+        if (old) scene.remove(old);
+    }
     const mesh = new THREE.Mesh(particleGeometry, getParticleMaterial(color));
     mesh.position.set(x, y, z);
     mesh.scale.set(size, size, size);
@@ -578,5 +584,191 @@ function updateMushroom(delta) {
             scene.remove(p);
             smokeParticles.splice(i, 1);
         }
+    }
+}
+
+// --- 核ミサイル（単弾頭 / MIRV）システム ---
+// rockets/updateRockets を手本にした独自エンティティ。createPrimedTNT は使わない。
+const nukeMissiles = [];
+const NUKE_MISSILE_SPEED = 40;        // 35〜45 u/s の中央値
+const NUKE_MISSILE_MAX_RANGE = 600;   // 射程（超過で自爆）
+const MIRV_SPLIT_TIME = 0.5;          // 発射後この秒数で分裂（着弾が先なら着弾点で分裂）
+const MIRV_CHILD_COUNT = 5;           // 子弾頭の数（4〜5）
+const MIRV_SPREAD = 14;               // 子弾頭の横方向拡散の強さ
+const nukeBlastQueue = [];            // 近接同時のnuke爆発を1フレーム1発に分散（MIRVのフレームスパイク対策）
+
+// リアルなミサイル形状（THREE.Group）。scale=1で全長約1.6。
+function buildNukeMissileMesh(scale, isMirv) {
+    const g = new THREE.Group();
+
+    // 円筒ボディ（白〜灰）
+    const bodyMat = new THREE.MeshLambertMaterial({ color: 0xECEFF1 });
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 1.0, 10), bodyMat);
+    g.add(body);
+
+    // 赤い帯マーキング（細い円筒のリング）
+    const bandMat = new THREE.MeshLambertMaterial({ color: 0xD32F2F });
+    const band = new THREE.Mesh(new THREE.CylinderGeometry(0.125, 0.125, 0.12, 10), bandMat);
+    band.position.y = 0.15;
+    g.add(band);
+
+    // 尖ったノーズコーン（赤い先端）
+    const noseMat = new THREE.MeshLambertMaterial({ color: 0xD32F2F });
+    const nose = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.5, 10), noseMat);
+    nose.position.y = 0.75; // ボディ上端 +コーン半高
+    g.add(nose);
+
+    // 後部に4枚の尾翼フィン（薄いBox）
+    const finMat = new THREE.MeshLambertMaterial({ color: 0x90A4AE });
+    for (let i = 0; i < 4; i++) {
+        const fin = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.28, 0.22), finMat);
+        const a = i * Math.PI / 2;
+        fin.position.set(Math.cos(a) * 0.16, -0.42, Math.sin(a) * 0.16);
+        fin.rotation.y = -a;
+        g.add(fin);
+    }
+
+    // オレンジの噴射炎（小Cone・毎フレーム明滅/伸縮させる）
+    const flameMat = new THREE.MeshBasicMaterial({ color: 0xFF6D00, transparent: true, opacity: 0.9 });
+    const flame = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.4, 8), flameMat);
+    flame.position.y = -0.72;
+    flame.rotation.x = Math.PI; // 後ろ向きに尖らせる
+    g.add(flame);
+    g.userData.flame = flame;
+
+    // MIRV母体は識別用に帯を黄色にしておく
+    if (isMirv) bandMat.color.setHex(0xFFD600);
+
+    g.scale.setScalar(scale);
+    return g;
+}
+
+// ミサイルを1基生成して nukeMissiles に登録
+function spawnNukeMissile(position, direction, scale, isMirv, canSplit) {
+    const mesh = buildNukeMissileMesh(scale, isMirv);
+    mesh.position.copy(position);
+    // 機首(+Y)を進行方向へ向ける
+    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.clone().normalize());
+    scene.add(mesh);
+    nukeMissiles.push({
+        mesh: mesh,
+        velocity: direction.clone().normalize().multiplyScalar(NUKE_MISSILE_SPEED),
+        traveled: 0,
+        age: 0,
+        isMirv: isMirv,
+        canSplit: canSplit,   // true=分裂前の母体 / false=単弾頭・分裂後の子弾頭
+        flameTime: 0
+    });
+}
+
+// プレイヤー視点から発射（actions.js から呼ぶ）
+function launchNukeMissile(isMirv) {
+    const dir = new THREE.Vector3();
+    camera.getWorldDirection(dir);
+    dir.y += 0.12; // やや上向き
+    dir.normalize();
+    const spawnPos = camera.position.clone().add(dir.clone().multiplyScalar(1.5));
+    spawnNukeMissile(spawnPos, dir, 1.0, isMirv, isMirv); // 母体は分裂可
+    playSound('missile_launch');
+    triggerGunRecoil();
+}
+
+// 母体を MIRV_CHILD_COUNT 個の子弾頭へコーン状に分裂
+function splitMirv(missile) {
+    const baseDir = missile.velocity.clone().normalize();
+    const pos = missile.mesh.position.clone();
+    // baseDir に直交する2軸を作る
+    const up = Math.abs(baseDir.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
+    const side = new THREE.Vector3().crossVectors(baseDir, up).normalize();
+    const side2 = new THREE.Vector3().crossVectors(baseDir, side).normalize();
+    for (let i = 0; i < MIRV_CHILD_COUNT; i++) {
+        const a = (i / MIRV_CHILD_COUNT) * Math.PI * 2;
+        const spread = side.clone().multiplyScalar(Math.cos(a)).add(side2.clone().multiplyScalar(Math.sin(a)));
+        const childDir = baseDir.clone().multiplyScalar(NUKE_MISSILE_SPEED)
+            .add(spread.multiplyScalar(MIRV_SPREAD)).normalize();
+        spawnNukeMissile(pos, childDir, 0.6, true, false); // 子は分裂しない
+    }
+}
+
+function disposeNukeMissileMesh(group) {
+    group.traverse(o => {
+        if (o.isMesh) {
+            if (o.geometry) o.geometry.dispose();
+            if (o.material) o.material.dispose();
+        }
+    });
+}
+
+function updateNukeMissiles(delta) {
+    const limit = WORLD_SIZE / 2;
+    for (let i = nukeMissiles.length - 1; i >= 0; i--) {
+        const m = nukeMissiles[i];
+        m.age += delta;
+        m.flameTime += delta;
+
+        // 噴射炎の明滅/伸縮
+        const flame = m.mesh.userData.flame;
+        if (flame) {
+            const f = 0.7 + Math.random() * 0.6;
+            flame.scale.set(1, f, 1);
+            flame.material.opacity = 0.6 + Math.random() * 0.4;
+        }
+
+        // 機首を進行方向へ追従
+        m.mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), m.velocity.clone().normalize());
+
+        // 移動
+        const movement = m.velocity.clone().multiplyScalar(delta);
+        m.mesh.position.add(movement);
+        m.traveled += movement.length();
+
+        // 後方に煙トレイル（寿命短め）。spawnSmoke を再利用。
+        const back = m.velocity.clone().normalize().multiplyScalar(-0.5).add(m.mesh.position);
+        spawnSmoke(
+            back.x, back.y, back.z,
+            0x9e9e9e, 0.4 + Math.random() * 0.3,
+            new THREE.Vector3((Math.random() - 0.5), 0.5 + Math.random(), (Math.random() - 0.5)),
+            0.5 + Math.random() * 0.3, // life 短め
+            0.6, 1.0
+        );
+
+        // 着弾判定（updateRockets を手本：レイキャスト＋直接セル＋境界）
+        let hit = false;
+        const pos = m.mesh.position;
+        const rayDir = m.velocity.clone().normalize();
+        const ray = new THREE.Raycaster(pos.clone(), rayDir, 0, movement.length() + 0.3);
+        const intersects = ray.intersectObjects(blockMeshes, false);
+        for (const it of intersects) {
+            const props = BLOCK_PROPS[it.object.userData.type];
+            if (props && props.noCollide) continue;
+            hit = true; break;
+        }
+        const blockKey = getKey(Math.floor(pos.x), Math.floor(pos.y), Math.floor(pos.z));
+        if (blockData[blockKey] && !BLOCK_PROPS[blockData[blockKey]]?.noCollide) hit = true;
+        if (Math.abs(pos.x) > limit || Math.abs(pos.z) > limit || pos.y < 0 || pos.y > 80) hit = true;
+        if (m.traveled > NUKE_MISSILE_MAX_RANGE) hit = true;
+
+        // MIRV母体は「分裂時刻 or 着弾」の早い方で子弾頭へ分裂（着弾しても爆発せず必ず分裂する）
+        if (m.canSplit && (m.age >= MIRV_SPLIT_TIME || hit)) {
+            splitMirv(m);
+            scene.remove(m.mesh);
+            disposeNukeMissileMesh(m.mesh);
+            nukeMissiles.splice(i, 1);
+            continue;
+        }
+
+        if (hit) {
+            // 即時explodeせずキューへ（MIRV5発が同フレームに重なるフリーズを回避・1フレーム1発で処理）
+            nukeBlastQueue.push({ x: pos.x, y: pos.y, z: pos.z });
+            scene.remove(m.mesh);
+            disposeNukeMissileMesh(m.mesh);
+            nukeMissiles.splice(i, 1);
+        }
+    }
+
+    // 1フレームにつき最大1発のnuke爆発を処理（MIRV同時多発のフレームスパイクを時間分散）
+    if (nukeBlastQueue.length > 0) {
+        const b = nukeBlastQueue.shift();
+        explode(b.x, b.y, b.z, false, null, 'nuke');
     }
 }

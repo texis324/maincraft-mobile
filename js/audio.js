@@ -26,6 +26,7 @@ function createNoiseBuffer() {
 const noiseBuffer = createNoiseBuffer();
 
 let lastExplosionTime = 0;
+let lastWhistleTime = 0; // 空爆ホイッスルのスロットル（同フレーム多重発火の間引き用）
 
 function playSound(type, materialType) {
     if (audioCtx.state === 'suspended') audioCtx.resume();
@@ -108,6 +109,92 @@ function playSound(type, materialType) {
         rGain.gain.exponentialRampToValueAtTime(0.01, now + 2.8);
         rumble.connect(rFilter); rFilter.connect(rGain); rGain.connect(masterGain);
         rumble.start(); rumble.stop(now + 2.8);
+        return;
+    }
+
+    if (type === 'whistle') {
+        // 空爆で落ちてくる爆弾の「ヒューーン」: ピッチが高→低へスイープする下降トーン＋微ノイズ。
+        // 複数同時投下でも潰れないよう控えめゲイン。同フレーム多重発火だけスロットルで間引く。
+        if (now - lastWhistleTime < 0.05) return;
+        lastWhistleTime = now;
+
+        const dur = 1.8 + Math.random() * 0.5; // 約1.8〜2.3秒
+
+        // メインの下降トーン（高→低スイープ）
+        const osc = audioCtx.createOscillator();
+        osc.type = 'sine';
+        const startHz = 1600 + Math.random() * 400; // 開始ピッチに少しゆらぎ
+        osc.frequency.setValueAtTime(startHz, now);
+        osc.frequency.exponentialRampToValueAtTime(180, now + dur);
+
+        // 倍音を少し重ねて「ヒュー」感を強める（弱め）
+        const osc2 = audioCtx.createOscillator();
+        osc2.type = 'triangle';
+        osc2.frequency.setValueAtTime(startHz * 1.5, now);
+        osc2.frequency.exponentialRampToValueAtTime(270, now + dur);
+
+        const wGain = audioCtx.createGain();
+        // 立ち上がりは小さく→中盤で少し上げ→着弾前にフェードアウト。控えめピーク0.12。
+        wGain.gain.setValueAtTime(0.001, now);
+        wGain.gain.exponentialRampToValueAtTime(0.12, now + dur * 0.35);
+        wGain.gain.exponentialRampToValueAtTime(0.001, now + dur);
+
+        const wGain2 = audioCtx.createGain();
+        wGain2.gain.setValueAtTime(0.001, now);
+        wGain2.gain.exponentialRampToValueAtTime(0.04, now + dur * 0.35);
+        wGain2.gain.exponentialRampToValueAtTime(0.001, now + dur);
+
+        osc.connect(wGain);
+        osc2.connect(wGain2);
+        wGain.connect(masterGain);
+        wGain2.connect(masterGain);
+        osc.start(); osc.stop(now + dur);
+        osc2.start(); osc2.stop(now + dur);
+
+        // 微ノイズ（風切り感）。バンドパスで耳障りにならない帯域に絞る。
+        const air = audioCtx.createBufferSource();
+        air.buffer = noiseBuffer;
+        const airFilter = audioCtx.createBiquadFilter();
+        airFilter.type = 'bandpass';
+        airFilter.frequency.setValueAtTime(2000, now);
+        airFilter.frequency.exponentialRampToValueAtTime(600, now + dur);
+        airFilter.Q.value = 1.2;
+        const airGain = audioCtx.createGain();
+        airGain.gain.setValueAtTime(0.001, now);
+        airGain.gain.exponentialRampToValueAtTime(0.05, now + dur * 0.4);
+        airGain.gain.exponentialRampToValueAtTime(0.001, now + dur);
+        air.connect(airFilter); airFilter.connect(airGain); airGain.connect(masterGain);
+        air.start(); air.stop(now + dur);
+        return;
+    }
+
+    if (type === 'missile_launch') {
+        // ミサイル/ロケット発射の whoosh: 低→高へ駆け上がるノイズスイープ＋短いトーン。約0.45秒。
+        const dur = 0.45;
+
+        const whoosh = audioCtx.createBufferSource();
+        whoosh.buffer = noiseBuffer;
+        const wFilter = audioCtx.createBiquadFilter();
+        wFilter.type = 'bandpass';
+        wFilter.frequency.setValueAtTime(300, now);
+        wFilter.frequency.exponentialRampToValueAtTime(3000, now + dur);
+        wFilter.Q.value = 0.8;
+        const wGain = audioCtx.createGain();
+        wGain.gain.setValueAtTime(0.25, now);
+        wGain.gain.exponentialRampToValueAtTime(0.01, now + dur);
+        whoosh.connect(wFilter); wFilter.connect(wGain); wGain.connect(masterGain);
+        whoosh.start(); whoosh.stop(now + dur);
+
+        // 推進トーン（低→高）
+        const osc = audioCtx.createOscillator();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(120, now);
+        osc.frequency.exponentialRampToValueAtTime(600, now + dur);
+        const oGain = audioCtx.createGain();
+        oGain.gain.setValueAtTime(0.1, now);
+        oGain.gain.exponentialRampToValueAtTime(0.01, now + dur);
+        osc.connect(oGain); oGain.connect(masterGain);
+        osc.start(); osc.stop(now + dur);
         return;
     }
 

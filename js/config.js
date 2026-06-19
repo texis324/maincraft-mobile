@@ -41,11 +41,13 @@ const BLOCKS = {
     MEGA_TNT: 7, // 超強力TNT（半径2倍）
     ROCKET_LAUNCHER: 102, // ロケットランチャー
     NUKE: 8, // 原子爆弾（超広範囲・キノコ雲）
-    HBOMB: 9 // 水素爆弾（原爆のさらに上・超巨大クレーター）
+    HBOMB: 9, // 水素爆弾（原爆のさらに上・超巨大クレーター）
+    NUKE_MISSILE: 10, // 核ミサイル（単弾頭・右クリで発射）
+    MIRV_MISSILE: 11 // MIRV核ミサイル（飛行中に複数弾頭へ分裂）
 };
 
 // Initial Inventory Order
-let INVENTORY = [BLOCKS.GRASS, BLOCKS.STONE, BLOCKS.WOOD, BLOCKS.LEAVES, BLOCKS.TNT, BLOCKS.MEGA_TNT, BLOCKS.NUKE, BLOCKS.HBOMB, BLOCKS.FLINT, BLOCKS.WATER, BLOCKS.TNT_LAUNCHER, BLOCKS.ROCKET_LAUNCHER];
+let INVENTORY = [BLOCKS.GRASS, BLOCKS.STONE, BLOCKS.WOOD, BLOCKS.LEAVES, BLOCKS.TNT, BLOCKS.MEGA_TNT, BLOCKS.NUKE, BLOCKS.HBOMB, BLOCKS.FLINT, BLOCKS.WATER, BLOCKS.TNT_LAUNCHER, BLOCKS.ROCKET_LAUNCHER, BLOCKS.NUKE_MISSILE, BLOCKS.MIRV_MISSILE];
 let selectedItemIndex = 0;
 let swapSourceIndex = -1;
 
@@ -71,7 +73,9 @@ const BLOCK_PROPS = {
     [BLOCKS.BEDROCK]: { color: 0x000000, sound: 'hard' },
     [BLOCKS.FLINT]: { isTool: true },
     [BLOCKS.TNT_LAUNCHER]: { isTool: true },
-    [BLOCKS.ROCKET_LAUNCHER]: { isTool: true }
+    [BLOCKS.ROCKET_LAUNCHER]: { isTool: true },
+    [BLOCKS.NUKE_MISSILE]: { isTool: true, color: 0xECEFF1 }, // 設置不可・右クリで発射
+    [BLOCKS.MIRV_MISSILE]: { isTool: true, color: 0xECEFF1 }
 };
 
 // --- Helper: Safe Pointer Lock ---

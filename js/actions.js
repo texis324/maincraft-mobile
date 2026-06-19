@@ -96,6 +96,16 @@ function attemptPlaceOrIgnite(screenX, screenY) {
         return;
     }
 
+    if (currentItem === BLOCKS.NUKE_MISSILE) {
+        launchNukeMissile(false);
+        return;
+    }
+
+    if (currentItem === BLOCKS.MIRV_MISSILE) {
+        launchNukeMissile(true);
+        return;
+    }
+
     // スクリーン座標が指定されていればそこを、なければ画面中央を使用
     let raycastCoords = new THREE.Vector2(0, 0);
     if (screenX !== undefined && screenY !== undefined) {

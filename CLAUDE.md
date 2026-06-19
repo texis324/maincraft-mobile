@@ -88,6 +88,16 @@ js/main.js        … メインループ animate()・起動（generateWorld/anim
 - **実測フリーズ**: 通常原爆(半径30/深さ16)≈0.28秒で快適。水爆(半径50/深さ24)≈0.96秒。最悪(半径60/深さ48)≈1.5秒。ボトルネックは大量の `delete blockData[key]`（V8の巨大オブジェクトdelete）。**将来の最適化案=クレーターを数フレームに分割(アニメ化)／blockDataをMap化**。
 - ⚠ `explode` で `const bottomY` が `radius` を参照するので順序注意（`R`はTDZで使えない）。
 
+## 追加機能: 核ミサイル / 設定永続化 / fog修正 / 落下音 / 下方ワープ修正
+
+- **核ミサイル(NUKE_MISSILE=10 / MIRV_MISSILE=11)**: entities.js の独立エンティティ `nukeMissiles`（rocket手本・createPrimedTNT不使用）。`buildNukeMissileMesh`=ノーズコーン+ボディ+赤帯+4フィン+噴射炎のGroup、煙トレイル。右クリ発射(actions.js)、毎フレーム`updateNukeMissiles`(main.js)。着弾で`explode(...,'nuke')`。**MIRV**は`MIRV_SPLIT_TIME=0.5s` または着弾の早い方で5発(`MIRV_CHILD_COUNT`)へコーン分裂(`splitMirv`)→各自着弾で個別キノコ雲。
+  - ⚠**MIRV同時爆発スパイク対策**: 着弾は即explodeせず`nukeBlastQueue`へ積み、`updateNukeMissiles`末尾で**1フレーム1発**だけ処理（5発同時の~1.5秒フリーズを時間分散）。
+  - 罠: 単純な「時刻だけで分裂」だと地面狙いで着弾が先行し分裂しない（floatで `14*0.05 < 0.7`）→「時刻 or 着弾」の早い方で分裂に修正済。
+- **設定永続化(js/persist.js)**: localStorage `maincraft_settings_v1`。`loadSettings()`をトップレベル即時実行（**mobile.js後・main.js前**＝mobileLookSensitivityのTDZ回避＆WORLD_SIZE/DEPTHをgenerateWorld前に確定）。autosaveは主要コントロールに自前リスナー。⚠**WORLD_SIZE/DEPTHは「再生成で適用済みの値(data.WORLD_SIZE/DEPTH)」を権威**にする（スライダーのドラッグだけの未適用値で復元すると、リロード時に勝手に再生成され設置ブロックが消える）。
+- **fog修正(scene.js applyFog)**: 旧 near15/far40 が近すぎて大きなキノコ雲(半径50)が霧で霞んだ→`near=max(40,WORLD_SIZE*0.9) / far=max(160,WORLD_SIZE*2.6)`にサイズ連動。`generateWorld`末尾でも`applyFog()`（再生成追従）。far<camera.far(1000)。
+- **落下音(audio.js)**: `'whistle'`=空爆の下降ホイッスル(高→低スイープ・スロットル`lastWhistleTime`)、`'missile_launch'`=発射whoosh。whistleは`callAirstrike`の各投下setTimeout内で鳴らす（createPrimedTNTに置くと全TNTで鳴る）。
+- **★下方ワープ修正(main.js)**: 「突然ワールドの下にワープ」バグ＝**ラグスパイクで delta 巨大化→1フレームで数十ブロック落下→床判定(±2ブロック)すり抜け**。修正=①`delta = Math.min(..., 0.05)` ②`velocity.y` を ±45 に終端クランプ。これで1フレーム縦移動≦約2.25ブロック＝当たり判定範囲内。**ラグと連動して起きる挙動の正体がこれ**。
+
 ## 開発フロー / 既知の事項
 
 - 作業ブランチ: `claude/game-bug-check-refactor-po14h4`。`main` へは PR 経由でマージ。

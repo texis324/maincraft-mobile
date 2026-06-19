@@ -1,7 +1,19 @@
 // --- 3. Three.js Initialization ---
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87CEEB);
-scene.fog = new THREE.Fog(0x87CEEB, 15, 40);
+// fog をマップサイズ連動で設定（PC専用方針なので大きなキノコ雲も眺められるよう遠くへ）
+// near は近景の空気感を残しつつ、far はマップ全体＋高く広い爆発煙を飲み込まないところまで伸ばす
+function applyFog() {
+    const near = Math.max(40, WORLD_SIZE * 0.9);
+    const far  = Math.max(160, WORLD_SIZE * 2.6);
+    if (scene.fog) {
+        scene.fog.near = near;
+        scene.fog.far  = far;
+    } else {
+        scene.fog = new THREE.Fog(0x87CEEB, near, far);
+    }
+}
+applyFog();
 
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
 camera.rotation.order = 'YXZ';

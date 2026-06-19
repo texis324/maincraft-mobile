@@ -20,7 +20,10 @@ function animate() {
     if(isGameOver) return;
 
     const time = performance.now();
-    const delta = (time - prevTime) / 1000;
+    // ラグスパイク（カクつき/タブ復帰/大爆発のフリーズ）で delta が巨大化すると
+    // 1フレームの移動量が跳ね上がり、床判定をすり抜けて世界の底に落ちる（=下方ワープ）。
+    // 上限0.05sにクランプして大ジャンプを防ぐ。
+    const delta = Math.min((time - prevTime) / 1000, 0.05);
     prevTime = time;
 
     // FPS Counter
@@ -75,6 +78,7 @@ function animate() {
     updateMushroom(delta); // 原爆のキノコ雲を更新
     updatePrimedTNTs(delta); // Update Physics TNT
     updateRockets(delta); // Update Rockets
+    updateNukeMissiles(delta); // 核ミサイル（単弾頭/MIRV）の飛行・分裂・着弾を更新
     updateGunAnimation(delta); // 銃のアニメーション更新
 
     // Physics & Movement
@@ -153,6 +157,9 @@ function animate() {
     if (camera.position.z > limit) camera.position.z = limit;
     if (camera.position.z < -limit) camera.position.z = -limit;
 
+    // 終端速度クランプ: 大爆発のノックバック等で落下/上昇速度が跳ね上がっても、
+    // 1フレームの縦移動を床判定の範囲内(±約2ブロック)に抑え、すり抜け＝下方ワープを防ぐ。
+    controls.velocity.y = Math.max(-45, Math.min(45, controls.velocity.y));
     camera.position.y += controls.velocity.y * delta;
     collisions = getCollidingBlocks(camera.position);
     if(collisions.length > 0) {

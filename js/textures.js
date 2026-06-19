@@ -95,6 +95,47 @@ function createTexture(type) {
         ctx.fillStyle = '#1B5E20'; ctx.fillRect(10, 15, 44, 20); // Barrel
         ctx.fillStyle = '#4E342E'; ctx.fillRect(15, 35, 12, 18); // Handle
         ctx.fillStyle = '#FFA000'; ctx.fillRect(48, 18, 6, 14); // Scope
+    } else if (type === 'nuke_missile') {
+        // 単弾頭ミサイルのアイコン（斜めに構えた白ボディ＋赤いノーズ＋尾翼＋噴射炎）
+        ctx.fillStyle = '#1A237E'; ctx.fillRect(0,0,64,64); // 濃紺の背景
+        ctx.save();
+        ctx.translate(32, 32); ctx.rotate(-Math.PI/4); // 斜め45度
+        // ボディ（白〜灰のグラデ風）
+        ctx.fillStyle = '#ECEFF1'; ctx.fillRect(-6, -22, 12, 40);
+        // 赤いノーズコーン（三角）
+        ctx.fillStyle = '#D32F2F';
+        ctx.beginPath(); ctx.moveTo(-6, -22); ctx.lineTo(6, -22); ctx.lineTo(0, -34); ctx.closePath(); ctx.fill();
+        // 赤い帯マーキング
+        ctx.fillStyle = '#D32F2F'; ctx.fillRect(-6, -8, 12, 4);
+        // 尾翼（後部の三角フィン）
+        ctx.fillStyle = '#90A4AE';
+        ctx.beginPath(); ctx.moveTo(-6, 12); ctx.lineTo(-14, 22); ctx.lineTo(-6, 18); ctx.closePath(); ctx.fill();
+        ctx.beginPath(); ctx.moveTo(6, 12); ctx.lineTo(14, 22); ctx.lineTo(6, 18); ctx.closePath(); ctx.fill();
+        // オレンジ噴射炎
+        ctx.fillStyle = '#FF6D00';
+        ctx.beginPath(); ctx.moveTo(-4, 18); ctx.lineTo(4, 18); ctx.lineTo(0, 30); ctx.closePath(); ctx.fill();
+        ctx.restore();
+    } else if (type === 'mirv_missile') {
+        // MIRVのアイコン（1本の母体＋上部で3本に枝分かれする弾頭を表現）
+        ctx.fillStyle = '#311B92'; ctx.fillRect(0,0,64,64); // 紫がかった背景
+        ctx.save();
+        ctx.translate(32, 36);
+        // 母体ボディ
+        ctx.fillStyle = '#ECEFF1'; ctx.fillRect(-6, -8, 12, 24);
+        // 帯マーキング（黄）
+        ctx.fillStyle = '#FFD600'; ctx.fillRect(-6, 4, 12, 3);
+        // 3つの子弾頭（コーン状に広がる赤ノーズ）
+        ctx.fillStyle = '#D32F2F';
+        const heads = [[-12, -26], [0, -30], [12, -26]];
+        for (const h of heads) {
+            ctx.beginPath(); ctx.moveTo(h[0]-4, h[1]+10); ctx.lineTo(h[0]+4, h[1]+10); ctx.lineTo(h[0], h[1]); ctx.closePath(); ctx.fill();
+            ctx.fillStyle = '#CFD8DC'; ctx.fillRect(h[0]-4, h[1]+10, 8, 6); ctx.fillStyle = '#D32F2F';
+        }
+        // 尾翼
+        ctx.fillStyle = '#90A4AE';
+        ctx.beginPath(); ctx.moveTo(-6, 10); ctx.lineTo(-14, 18); ctx.lineTo(-6, 16); ctx.closePath(); ctx.fill();
+        ctx.beginPath(); ctx.moveTo(6, 10); ctx.lineTo(14, 18); ctx.lineTo(6, 16); ctx.closePath(); ctx.fill();
+        ctx.restore();
     }
 
     const tex = new THREE.CanvasTexture(canvas);
@@ -116,6 +157,8 @@ const materials = {};
 let flintTexture;
 let launcherTexture;
 let rocketLauncherTexture;
+let nukeMissileTexture;
+let mirvMissileTexture;
 
 function initMaterials() {
     const grassTop = createTexture('grass_top');
@@ -132,6 +175,8 @@ function initMaterials() {
     flintTexture = createTexture('flint');
     launcherTexture = createTexture('launcher');
     rocketLauncherTexture = createTexture('rocket_launcher');
+    nukeMissileTexture = createTexture('nuke_missile');
+    mirvMissileTexture = createTexture('mirv_missile');
     const megaTntSide = createTexture('mega_tnt_side');
     const megaTntTop = createTexture('mega_tnt_top');
     const nukeSide = createTexture('nuke_side');
@@ -188,6 +233,22 @@ function initMaterials() {
         new THREE.MeshLambertMaterial({ map: hbombTop }),
         new THREE.MeshLambertMaterial({ map: hbombSide }),
         new THREE.MeshLambertMaterial({ map: hbombSide })
+    ];
+    materials[BLOCKS.NUKE_MISSILE] = [
+        new THREE.MeshLambertMaterial({ map: nukeMissileTexture }),
+        new THREE.MeshLambertMaterial({ map: nukeMissileTexture }),
+        new THREE.MeshLambertMaterial({ map: nukeMissileTexture }),
+        new THREE.MeshLambertMaterial({ map: nukeMissileTexture }),
+        new THREE.MeshLambertMaterial({ map: nukeMissileTexture }),
+        new THREE.MeshLambertMaterial({ map: nukeMissileTexture })
+    ];
+    materials[BLOCKS.MIRV_MISSILE] = [
+        new THREE.MeshLambertMaterial({ map: mirvMissileTexture }),
+        new THREE.MeshLambertMaterial({ map: mirvMissileTexture }),
+        new THREE.MeshLambertMaterial({ map: mirvMissileTexture }),
+        new THREE.MeshLambertMaterial({ map: mirvMissileTexture }),
+        new THREE.MeshLambertMaterial({ map: mirvMissileTexture }),
+        new THREE.MeshLambertMaterial({ map: mirvMissileTexture })
     ];
     materials[BLOCKS.WATER] = new THREE.MeshLambertMaterial({ map: water, transparent: true, opacity: 0.6, side: THREE.DoubleSide });
     materials[BLOCKS.BEDROCK] = new THREE.MeshLambertMaterial({ map: bedrock });

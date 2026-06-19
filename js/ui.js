@@ -10,6 +10,8 @@ function getImageForType(type) {
     else if(type === BLOCKS.FLINT) return flintTexture.image.toDataURL();
     else if(type === BLOCKS.TNT_LAUNCHER) return launcherTexture.image.toDataURL();
     else if(type === BLOCKS.ROCKET_LAUNCHER) return rocketLauncherTexture.image.toDataURL();
+    else if(type === BLOCKS.NUKE_MISSILE) return materials[type][0].map.image.toDataURL();
+    else if(type === BLOCKS.MIRV_MISSILE) return materials[type][0].map.image.toDataURL();
     else return materials[type].map.image.toDataURL();
 }
 
