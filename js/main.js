@@ -13,6 +13,9 @@ let wasInWater = false;
 generateWorld();
 // 起伏地形では地表高が一定でないので、乾いた陸地を探してスポーン
 spawnPlayer();
+// worldSeed を即座に永続化＝リロードで同じ地形＆保存済み改変(editsByChunk)が一致して復元される。
+// （設定を一度も触らない初回起動でも seed が保存されないと、リロードのたびに別世界になる）
+if (typeof saveSettings === 'function') saveSettings();
 
 function animate() {
     requestAnimationFrame(animate);

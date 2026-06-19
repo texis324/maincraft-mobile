@@ -63,6 +63,62 @@ function saveSettings() {
     }
 }
 
+// --- プレイヤー改変(editsByChunk)の localStorage 保存・復元（リロードを跨いで建造物/クレーターを残す） ---
+// worldSeed に紐付け（別シードの世界には適用しない）。サイズ上限つき＝近い順に詰めて溢れたら遠方を捨てる。
+const EDITS_KEY = 'maincraft_edits_v1';
+const MAX_PERSIST_EDITS = 60000;   // localStorage(~5MB)に収まる範囲。大爆発の全クレーターは入り切らない時がある
+let _editSaveTimer = null;
+
+function saveEditsToStore() {
+    try {
+        if (typeof editsByChunk === 'undefined') return;
+        const pcx = Math.floor(camera.position.x / 16), pcz = Math.floor(camera.position.z / 16);
+        const cks = Object.keys(editsByChunk);
+        // 近い順＝プレイヤーの手元の建造物が上限で切られても残る
+        cks.sort((a, b) => {
+            const pa = a.split(','), pb = b.split(',');
+            const da = (pa[0] - pcx) * (pa[0] - pcx) + (pa[2] - pcz) * (pa[2] - pcz);
+            const db = (pb[0] - pcx) * (pb[0] - pcx) + (pb[2] - pcz) * (pb[2] - pcz);
+            return da - db;
+        });
+        const out = {};
+        let count = 0;
+        for (let i = 0; i < cks.length; i++) {
+            const e = editsByChunk[cks[i]];
+            const n = Object.keys(e).length;
+            if (count + n > MAX_PERSIST_EDITS) break;
+            out[cks[i]] = e; count += n;
+        }
+        localStorage.setItem(EDITS_KEY, JSON.stringify({ seed: worldSeed, edits: out }));
+    } catch (e) {
+        console.warn('[persist] edit save failed (容量超過等・セッション中はメモリに残る):', e);
+    }
+}
+
+// 連続改変(採掘/爆破)で毎回保存しないようデバウンス。setBlock から呼ばれる。
+function scheduleEditSave() {
+    if (_editSaveTimer) clearTimeout(_editSaveTimer);
+    _editSaveTimer = setTimeout(saveEditsToStore, 1500);
+}
+
+// generateWorld() が seedHouse の後（＝clearWorld で消えた後）に呼ぶ。同じシードの時だけ復元。
+function loadPersistedEdits() {
+    try {
+        if (typeof editsByChunk === 'undefined') return;
+        const raw = localStorage.getItem(EDITS_KEY);
+        if (!raw) return;
+        const store = JSON.parse(raw);
+        if (!store || store.seed !== worldSeed || !store.edits) return; // 別シードには適用しない
+        for (const ck in store.edits) {
+            const e = store.edits[ck];
+            const dst = editsByChunk[ck] || (editsByChunk[ck] = {});
+            for (const key in e) dst[key] = e[key];
+        }
+    } catch (e) {
+        console.warn('[persist] edit load failed:', e);
+    }
+}
+
 // localStorage から復元 → グローバル代入 + DOM 同期
 function loadSettings() {
     const data = persistReadStore();
@@ -154,6 +210,9 @@ function persistAttachAutoSave() {
     // マップ再生成ボタン: 押下後に WORLD_SIZE/WORLD_DEPTH を保存
     const regen = persistGetEl('btn-regenerate');
     if (regen) regen.addEventListener('click', saveSettings);
+
+    // リロード/閉じる直前に改変を確実に書き出す（デバウンス待ちの取りこぼし防止）
+    window.addEventListener('beforeunload', saveEditsToStore);
 }
 
 // --- トップレベル即時実行（main.js の generateWorld より前に WORLD_SIZE/DEPTH を確定） ---

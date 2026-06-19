@@ -240,6 +240,7 @@ function setBlockData(x, y, z, type) {
 function setBlock(x, y, z, type, defer) {
     setBlockData(x, y, z, type);
     recordEdit(x, y, z, type);                 // 0=撤去も記録（再生成で再適用される）
+    if (typeof scheduleEditSave === 'function') scheduleEditSave(); // localStorage へデバウンス保存
     markDirty(x, y, z);
     if (!defer) flushDirtyChunks();
 }
@@ -709,6 +710,7 @@ function generateWorld() {
     if (!worldSeed) worldSeed = (Math.floor(Math.random() * 0x7fffffff)) || 12345;
     recomputeVerticalBounds();
     seedHouse(); // worldEdits に家を焼く（生成時に適用される）
+    if (typeof loadPersistedEdits === 'function') loadPersistedEdits(); // 保存済み改変を復元（同シードのみ）
 
     if (!_spiral) buildSpiral();
     // スポーン周辺を同期生成（足元の地面＋近景）。残りは animate の streamWorld が埋める。
