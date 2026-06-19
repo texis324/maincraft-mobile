@@ -88,7 +88,7 @@ function animate() {
 
     if (controls.isFlying) {
         controls.velocity.y -= controls.velocity.y * 2.0 * delta; // Reduced Air resistance
-        if (controls.jump) controls.velocity.y += 30.0 * delta;
+        if (controls.jump || controls.moveUp) controls.velocity.y += 30.0 * delta;
         if (controls.moveDown) controls.velocity.y -= 30.0 * delta;
     } else {
         controls.velocity.y -= GRAVITY * delta;

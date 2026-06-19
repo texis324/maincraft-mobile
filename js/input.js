@@ -129,6 +129,8 @@ document.addEventListener('keydown', (event) => {
     }
 
     if (!isPaused && !isInventoryOpen) {
+        // Ctrl下降中にブラウザのCtrl+S/A/F等が暴発しないよう抑制（プレイ中のみ・キャンセル可能なものだけ防げる）
+        if (event.ctrlKey) event.preventDefault();
         if (event.code === 'Digit1') setSlot(0);
         if (event.code === 'Digit2') setSlot(1);
         if (event.code === 'Digit3') setSlot(2);
@@ -173,7 +175,8 @@ document.addEventListener('keydown', (event) => {
             case 'ArrowLeft': case 'KeyA': controls.moveLeft = true; break;
             case 'ArrowDown': case 'KeyS': controls.moveBackward = true; break;
             case 'ArrowRight': case 'KeyD': controls.moveRight = true; break;
-            case 'ShiftLeft': case 'ShiftRight': controls.moveDown = true; break;
+            case 'ShiftLeft': case 'ShiftRight': controls.moveUp = true; break;     // 上昇（飛行中）
+            case 'ControlLeft': case 'ControlRight': controls.moveDown = true; break; // 下降（飛行中）
             case 'Space':
                 if (controls.isFlying) {
                     controls.jump = true; // Ascend
@@ -208,7 +211,8 @@ document.addEventListener('keyup', (event) => {
         case 'ArrowLeft': case 'KeyA': controls.moveLeft = false; break;
         case 'ArrowDown': case 'KeyS': controls.moveBackward = false; break;
         case 'ArrowRight': case 'KeyD': controls.moveRight = false; break;
-        case 'ShiftLeft': case 'ShiftRight': controls.moveDown = false; break;
+        case 'ShiftLeft': case 'ShiftRight': controls.moveUp = false; break;
+        case 'ControlLeft': case 'ControlRight': controls.moveDown = false; break;
         case 'Space': controls.jump = false; break;
     }
 });

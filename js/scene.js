@@ -128,7 +128,8 @@ const controls = {
     moveForward: false, moveBackward: false,
     moveLeft: false, moveRight: false,
     jump: false,
-    moveDown: false, // For flight
+    moveUp: false,   // 飛行中の上昇（Shift）
+    moveDown: false, // 飛行中の下降（Ctrl）
     canJump: false,
     isFlying: false,
     isSprinting: false, // Dash

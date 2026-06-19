@@ -667,8 +667,11 @@ function launchNukeMissile(isMirv) {
     camera.getWorldDirection(dir);
     dir.y += 0.12; // やや上向き
     dir.normalize();
-    const spawnPos = camera.position.clone().add(dir.clone().multiplyScalar(1.5));
-    spawnNukeMissile(spawnPos, dir, 1.0, isMirv, isMirv); // 母体は分裂可
+    // 単弾頭は大きく＝核ミサイルっぽさ。MIRVの母体は従来サイズ（子弾頭も小さいまま）
+    const scale = isMirv ? 1.0 : 2.6;
+    const ahead = isMirv ? 1.5 : 3.2; // 大きい分すこし前方から出す
+    const spawnPos = camera.position.clone().add(dir.clone().multiplyScalar(ahead));
+    spawnNukeMissile(spawnPos, dir, scale, isMirv, isMirv); // 母体は分裂可
     playSound('missile_launch');
     triggerGunRecoil();
 }
