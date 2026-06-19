@@ -318,11 +318,12 @@ function explode(cx, cy, cz, isMega = false, customRadius = null, bombKind = nul
         playSound('explode');
     }
 
-    // 半径: 水爆 > 原爆 > customRadius > MEGA(8) > 通常(4)
+    // 半径: 明示指定(customRadius・ミサイルairburst等)が最優先 > 水爆 > 原爆 > MEGA(8) > 通常(4)
     let radius;
-    if (bombKind === 'hbomb') radius = hbombPower;
+    if (customRadius !== null) radius = customRadius;
+    else if (bombKind === 'hbomb') radius = hbombPower;
     else if (bombKind === 'nuke') radius = nukePower;
-    else radius = customRadius !== null ? customRadius : (isMega ? 8 : 4);
+    else radius = isMega ? 8 : 4;
 
     const particleCount = isBomb ? (bombKind === 'hbomb' ? 220 : 140) : (isMega ? 60 : 30);
     const particleSize = isBomb ? 0.9 : (isMega ? 0.6 : 0.4);
@@ -596,6 +597,7 @@ const MIRV_SPLIT_TIME = 0.5;          // 発射後この秒数で分裂（着弾
 const MIRV_CHILD_COUNT = 5;           // 子弾頭の数（4〜5）
 const MIRV_SPREAD = 14;               // 子弾頭の横方向拡散の強さ
 const nukeBlastQueue = [];            // 近接同時のnuke爆発を1フレーム1発に分散（MIRVのフレームスパイク対策）
+const NUKE_MISSILE_AIRBURST_H = 7;    // 単弾頭ミサイルが地表からこの高さで空中爆発（airburst・横に広く薙ぎ払う）
 
 // リアルなミサイル形状（THREE.Group）。scale=1で全長約1.6。
 function buildNukeMissileMesh(scale, isMirv) {
@@ -702,6 +704,15 @@ function disposeNukeMissileMesh(group) {
     });
 }
 
+// ミサイル直下の地表（最上段の固体ブロック）のYを返す（airburst高度の基準）
+function nukeGroundYBelow(x, z, fromY) {
+    for (let y = Math.floor(fromY); y > worldBottomY; y--) {
+        const t = blockData[getKey(x, y, z)];
+        if (t && !(BLOCK_PROPS[t] && BLOCK_PROPS[t].noCollide)) return y;
+    }
+    return worldBottomY;
+}
+
 function updateNukeMissiles(delta) {
     const limit = WORLD_SIZE / 2;
     for (let i = nukeMissiles.length - 1; i >= 0; i--) {
@@ -751,6 +762,13 @@ function updateNukeMissiles(delta) {
         if (Math.abs(pos.x) > limit || Math.abs(pos.z) > limit || pos.y < 0 || pos.y > 80) hit = true;
         if (m.traveled > NUKE_MISSILE_MAX_RANGE) hit = true;
 
+        // 単弾頭ミサイルは空中爆発(airburst): 降下中に「地表+H」で炸裂＝横に広く薙ぎ払う（被害最大化・MIRVは対象外）
+        let airburstRadius = null;
+        if (!m.isMirv && m.velocity.y < 0 && m.traveled > 10) {
+            const gy = nukeGroundYBelow(Math.floor(pos.x), Math.floor(pos.z), pos.y);
+            if (pos.y <= gy + NUKE_MISSILE_AIRBURST_H) airburstRadius = Math.round(nukePower * 1.25);
+        }
+
         // MIRV母体は「分裂時刻 or 着弾」の早い方で子弾頭へ分裂（着弾しても爆発せず必ず分裂する）
         if (m.canSplit && (m.age >= MIRV_SPLIT_TIME || hit)) {
             splitMirv(m);
@@ -760,9 +778,10 @@ function updateNukeMissiles(delta) {
             continue;
         }
 
-        if (hit) {
+        if (airburstRadius !== null || hit) {
             // 即時explodeせずキューへ（MIRV5発が同フレームに重なるフリーズを回避・1フレーム1発で処理）
-            nukeBlastQueue.push({ x: pos.x, y: pos.y, z: pos.z });
+            // airburst時はその大きめ半径を渡す（地表炸裂より横に広く薙ぎ払う）
+            nukeBlastQueue.push({ x: pos.x, y: pos.y, z: pos.z, radius: airburstRadius });
             scene.remove(m.mesh);
             disposeNukeMissileMesh(m.mesh);
             nukeMissiles.splice(i, 1);
@@ -772,6 +791,6 @@ function updateNukeMissiles(delta) {
     // 1フレームにつき最大1発のnuke爆発を処理（MIRV同時多発のフレームスパイクを時間分散）
     if (nukeBlastQueue.length > 0) {
         const b = nukeBlastQueue.shift();
-        explode(b.x, b.y, b.z, false, null, 'nuke');
+        explode(b.x, b.y, b.z, false, b.radius, 'nuke'); // b.radius=null(接触)→nukePower / 数値(airburst)→その半径
     }
 }
