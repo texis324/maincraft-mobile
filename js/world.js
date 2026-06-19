@@ -21,6 +21,51 @@ function recordEdit(x, y, z, type) {
     (editsByChunk[ck] || (editsByChunk[ck] = {}))[getKey(x, y, z)] = type;
 }
 
+// ---- 爆発イベント（大爆発の永続化を「掘削edit数万」→「イベント1件」に圧縮） ----
+// 原爆/水爆は1発で約10万ブロックを撤去する。これを per-block edit で記録すると (1)記録が重い
+// (2)localStorage上限(MAX_PERSIST_EDITS)を超えてクレーターがリロードで欠ける。そこで「爆発1件」を
+// {cx,cy,cz,R,isBomb} として記録し、チャンク生成時に explode と同じ式で再カーブして復元する。
+// 形状(お椀/真球・深さ上限)は決定的なので完全再現される。
+const explosionEvents = [];
+function recordExplosionEvent(cx, cy, cz, R, isBomb) {
+    explosionEvents.push({ cx: cx, cy: cy, cz: cz, R: R, isBomb: isBomb });
+}
+// 1チャンクに、重なる全爆発イベントを再カーブで適用（generateChunk から block-edit より前に呼ぶ）。
+// explode の掘削と同じ「下半分=お椀/それ以外=真球」「岩盤は残す」を局所インデックスで再現。
+function applyExplosionEventsToChunk(ch) {
+    if (explosionEvents.length === 0) return;
+    const bx0 = ch.cx * CS, by0 = ch.cy * CS, bz0 = ch.cz * CS;
+    const bx1 = bx0 + CS - 1, by1 = by0 + CS - 1, bz1 = bz0 + CS - 1;
+    const data = ch.data;
+    for (let i = 0; i < explosionEvents.length; i++) {
+        const ev = explosionEvents[i];
+        const R = ev.R, R2 = R * R;
+        if (ev.cx + R < bx0 || ev.cx - R > bx1 || ev.cz + R < bz0 || ev.cz - R > bz1) continue; // bbox早期棄却
+        const Rv2 = (R * (ev.isBomb ? 0.4 : 1.0)) ** 2;
+        const bottomY = Math.max(worldBottomY + 1, Math.floor(ev.cy) - Math.min(R, 30));
+        if (ev.cy + R < by0 || bottomY > by1) continue;
+        const lx0 = Math.max(0, Math.ceil(ev.cx - R) - bx0), lx1 = Math.min(CS - 1, Math.floor(ev.cx + R) - bx0);
+        const lyLo = Math.max(bottomY, Math.ceil(ev.cy - R));
+        const ly0 = Math.max(0, lyLo - by0), ly1 = Math.min(CS - 1, Math.floor(ev.cy + R) - by0);
+        for (let lx = lx0; lx <= lx1; lx++) {
+            const dx = (bx0 + lx) - ev.cx, dx2 = dx * dx;
+            if (dx2 > R2) continue;
+            for (let ly = ly0; ly <= ly1; ly++) {
+                const dy = (by0 + ly) - ev.cy;
+                const maxDz2 = (ev.isBomb && dy < 0) ? R2 * (1 - (dy * dy) / Rv2) - dx2 : R2 - dx2 - dy * dy;
+                if (maxDz2 < 0) continue;
+                const dzMax = Math.sqrt(maxDz2);
+                const wzlo = Math.max(bz0, Math.ceil(ev.cz - dzMax)), wzhi = Math.min(bz1, Math.floor(ev.cz + dzMax));
+                for (let wz = wzlo; wz <= wzhi; wz++) {
+                    const idx = (ly * CS + (wz - bz0)) * CS + lx;
+                    const t = data[idx];
+                    if (t && t !== BLOCKS.BEDROCK) data[idx] = 0; // 岩盤は残す
+                }
+            }
+        }
+    }
+}
+
 function getKey(x, y, z) { return x + ',' + y + ',' + z; }
 function chunkKey(cx, cy, cz) { return cx + ',' + cy + ',' + cz; }
 function chunkCoord(v) { return Math.floor(v / CS); }
@@ -272,6 +317,7 @@ function clearWorld() {
         delete chunks[ck];
     }
     for (const k in editsByChunk) delete editsByChunk[k];
+    explosionEvents.length = 0;
     dirtyChunks.clear();
     _invalidateGetCache();
 }
@@ -516,6 +562,7 @@ function generateChunk(ch) {
     }
     carveRavinesInChunk(ch);
     placeTreesInChunk(ch);
+    applyExplosionEventsToChunk(ch); // 爆発イベントを再カーブ（block-edit より前＝後から建てた物が上書きで残る）
     applyEditsToChunk(ch);
     ch.generated = true;
     _invalidateGetCache();
@@ -551,6 +598,8 @@ const LOAD_DEPTH = 72;          // 各列で地表からこの深さまでは常
 const UNLOAD_MARGIN = 2;        // 水平のアンロード余白（ヒステリシス）
 const GEN_BUDGET = 4;           // 1フレームに生成するチャンク上限
 const MESH_BUDGET = 6;          // 1フレームに再メッシュするチャンク上限（移動中の追いつき優先）
+const MESH_CATCHUP = 14;        // バックログが多い時(大爆発直後等)の上限。フリーズしない範囲で速く消化
+const MESH_CATCHUP_AT = 40;     // dirty がこの数を超えたら CATCHUP 予算に切替
 const MAX_VIEW = 16;            // VIEW_DIST の上限（スパイラル事前計算用）
 let _spiral = null;
 let _lastPcx = 2147483647, _lastPcy = 0, _lastPcz = 0; // 直近のプレイヤーチャンク

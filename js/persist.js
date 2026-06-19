@@ -66,7 +66,8 @@ function saveSettings() {
 // --- プレイヤー改変(editsByChunk)の localStorage 保存・復元（リロードを跨いで建造物/クレーターを残す） ---
 // worldSeed に紐付け（別シードの世界には適用しない）。サイズ上限つき＝近い順に詰めて溢れたら遠方を捨てる。
 const EDITS_KEY = 'maincraft_edits_v1';
-const MAX_PERSIST_EDITS = 60000;   // localStorage(~5MB)に収まる範囲。大爆発の全クレーターは入り切らない時がある
+const MAX_PERSIST_EDITS = 60000;   // localStorage(~5MB)に収まる範囲。設置/採掘の per-block edit 用
+const MAX_PERSIST_EVENTS = 2000;   // 爆発イベント(クレーター)の保存上限。1件が軽いので多めでも安全
 let _editSaveTimer = null;
 
 function saveEditsToStore() {
@@ -90,7 +91,9 @@ function saveEditsToStore() {
             if (count + n > MAX_PERSIST_EDITS) break;
             out[cks[i]] = e; count += n;
         }
-        localStorage.setItem(EDITS_KEY, JSON.stringify({ seed: worldSeed, edits: out }));
+        // 爆発イベント(クレーター)も保存。1件=数値5個と軽いので直近 MAX_PERSIST_EVENTS 件まで丸ごと。
+        const evs = (typeof explosionEvents !== 'undefined') ? explosionEvents.slice(-MAX_PERSIST_EVENTS) : [];
+        localStorage.setItem(EDITS_KEY, JSON.stringify({ seed: worldSeed, edits: out, events: evs }));
     } catch (e) {
         console.warn('[persist] edit save failed (容量超過等・セッション中はメモリに残る):', e);
     }
@@ -110,11 +113,17 @@ function loadPersistedEdits() {
         const raw = localStorage.getItem(EDITS_KEY);
         if (!raw) return;
         const store = JSON.parse(raw);
-        if (!store || store.seed !== worldSeed || !store.edits) return; // 別シードには適用しない
-        for (const ck in store.edits) {
-            const e = store.edits[ck];
-            const dst = editsByChunk[ck] || (editsByChunk[ck] = {});
-            for (const key in e) dst[key] = e[key];
+        if (!store || store.seed !== worldSeed) return;                // 別シードには適用しない
+        if (store.edits) {
+            for (const ck in store.edits) {
+                const e = store.edits[ck];
+                const dst = editsByChunk[ck] || (editsByChunk[ck] = {});
+                for (const key in e) dst[key] = e[key];
+            }
+        }
+        // 爆発イベント(クレーター)を復元。チャンク生成時に再カーブされる。
+        if (Array.isArray(store.events) && typeof explosionEvents !== 'undefined') {
+            for (let i = 0; i < store.events.length; i++) explosionEvents.push(store.events[i]);
         }
     } catch (e) {
         console.warn('[persist] edit load failed:', e);

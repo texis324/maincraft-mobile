@@ -55,7 +55,9 @@ function animate() {
     // ★無限ワールド: プレイヤー周囲のチャンクを動的生成し遠方を破棄。生成で増えた dirty を
     //   このフレームの予算ぶんだけメッシュ化（残りは次フレーム＝歩いても重くなりすぎない）。
     streamWorld(camera.position.x, camera.position.y, camera.position.z);
-    flushDirtyChunks(MESH_BUDGET);
+    // 通常は MESH_BUDGET。大爆発直後などバックログが多い時だけ CATCHUP 予算で速く消化
+    //（無予算 flush による一括フリーズを避けつつ、クレーターを数フレームで完成させる）。
+    flushDirtyChunks(dirtyChunks.size > MESH_CATCHUP_AT ? MESH_CATCHUP : MESH_BUDGET);
 
     // Game Logic
     if (isLeftMouseDown && time - lastActionTime > getBreakDelay()) {

@@ -281,6 +281,46 @@ function callAirstrike() {
     }
 }
 
+// クレーターの縁に掘り出した土砂を環状に積む（リップ/ejecta）。地表核爆発を現実っぽく見せる。
+// 高さは内端(r≈R)で最大→外端で0へ減衰。決定的ノイズで縁をギザつかせる（再生成で同じ）。
+function buildCraterRim(cx, cy, cz, R, affected) {
+    const surfC = terrainHeightAt(Math.round(cx), Math.round(cz));
+    // 爆心が地面から大きく浮いている（＝空中炸裂）なら縁は作らない
+    if (cy - surfC > R * 0.3) return;
+
+    const rInner = R * 0.95, rOuter = R * 1.35;
+    const rInner2 = rInner * rInner, rOuter2 = rOuter * rOuter;
+    const lipMax = Math.max(1, Math.round(R * 0.1)); // 縁の最大の高さ（ブロック）
+    const ix0 = Math.floor(cx - rOuter), ix1 = Math.ceil(cx + rOuter);
+    const iz0 = Math.floor(cz - rOuter), iz1 = Math.ceil(cz + rOuter);
+    for (let x = ix0; x <= ix1; x++) {
+        for (let z = iz0; z <= iz1; z++) {
+            const dx = x - cx, dz = z - cz;
+            const r2 = dx * dx + dz * dz;
+            if (r2 < rInner2 || r2 > rOuter2) continue;
+            const r = Math.sqrt(r2);
+            const t = 1 - (r - rInner) / (rOuter - rInner);              // 内端1→外端0
+            const jitter = 0.55 + 0.45 * valueNoise2(x * 0.6, z * 0.6, worldSeed + 808);
+            const h = Math.round(lipMax * t * jitter);
+            if (h <= 0) continue;
+            // この列の地表（手付かずの基準高）。掘られて穴になっている内側は ground=0 で自動スキップ＝
+            // クレーターの“外側の縁”だけに土砂が積もる。
+            const base = terrainHeightAt(x, z);
+            const ground = getBlock(x, base, z);
+            if (!ground || ground === BLOCKS.WATER) continue;           // 水/空中/未ロードには積まない
+            const ejecta = (ground === BLOCKS.GRASS) ? BLOCKS.DIRT : ground; // 草地は下の土が抉れて出る
+            for (let k = 1; k <= h; k++) {
+                const yy = base + k;
+                if (getBlock(x, yy, z)) continue;                       // 既に何かあれば積まない
+                const ck = chunkOf(x, yy, z);
+                setBlockData(x, yy, z, ejecta);
+                (editsByChunk[ck] || (editsByChunk[ck] = {}))[getKey(x, yy, z)] = ejecta; // 永続復元用
+                affected.add(ck);                                       // dirty化は呼び出し側で一括
+            }
+        }
+    }
+}
+
 // bombKind: null | 'nuke' | 'hbomb'
 function explode(cx, cy, cz, isMega = false, customRadius = null, bombKind = null) {
     const isBomb = (bombKind === 'nuke' || bombKind === 'hbomb');
@@ -312,27 +352,53 @@ function explode(cx, cy, cz, isMega = false, customRadius = null, bombKind = nul
     createBlockParticles(cx, cy, cz, particleType, particleCount, particleSize);
     if (isBomb) createMushroomCloud(cx, cy, cz, radius);
 
-    // --- 地形を球状にえぐる（深さ対応・サーフェスカリング向けに二段処理） ---
+    // --- 地形をえぐる（深さ対応・サーフェスカリング向けに二段処理） ---
+    // 通常爆発は真球。原爆/水爆は現実の地表核爆発に寄せて「横長で浅いお椀」にする
+    //（実物のクレーターは 深さ:直径 ≈ 1:4〜1:6 と平べったい）。掘り出した土砂は後で縁に環状に積む。
     // 掘る深さは爆心から最大30まで（岩盤は残す）。深いマップで底まで掘って激重になるのを防ぐ
     const bottomY = Math.max(worldBottomY + 1, Math.floor(cy) - Math.min(radius, 30));
     const R = radius, R2 = R * R;
-    function inBlast(x, y, z) {
-        if (y < bottomY) return false;
-        return ((x - cx) ** 2 + (y - cy) ** 2 + (z - cz) ** 2) <= R2;
-    }
+    const depthScale = isBomb ? 0.4 : 1.0;   // 下方向の有効半径の比率（<1＝浅く広く・お椀型）
+    const Rv2 = (R * depthScale) ** 2;
     const chainForce = bombKind ? 40 : (isMega ? 30 : 20);
     const x0 = Math.floor(cx - R), x1 = Math.ceil(cx + R);
     const y0 = Math.max(bottomY, Math.floor(cy - R));
     // Y上限は地表（または爆心）の少し上まで。広大な空中セルを総当たりしない＝重い爆弾の高速化
     const y1 = Math.min(Math.ceil(cy + R), Math.max(SURFACE_Y, Math.ceil(cy)) + 8);
-    const z0 = Math.floor(cz - R), z1 = Math.ceil(cz + R);
+    // 掘削：外接立方体の総当たり(約59万回のinBlast)をやめ、各(x,y)で z 範囲を解析的に算出して
+    // 球/お椀の内側だけを回す（約12万回に激減＝最大のボトルネックを除去）。さらにチャンク局所ポインタで
+    // data を直書きし、毎ブロックの chunkKey 文字列生成・map 参照・getBlock キャッシュ無効化を排除。
+    // dirty化と保存はループ後に1回。
+    const affected = new Set();
+    let pcx = 2147483647, pcy = 0, pcz = 0, pch = null, pgen = false, pbx = 0, pby = 0, pbz = 0, pck = '', pedit = null;
     for (let x = x0; x <= x1; x++) {
+        const dxo = x - cx, dx2 = dxo * dxo;
+        if (dx2 > R2) continue;
         for (let y = y0; y <= y1; y++) {
-            for (let z = z0; z <= z1; z++) {
-                if (!inBlast(x, y, z)) continue;
-                const t = getBlock(x, y, z);
-                if (t === BLOCKS.BEDROCK) continue;
-                if (!t) { carveUnloaded(x, y, z); continue; } // 未生成チャンク内は撤去editだけ記録（後で復元）
+            const dyo = y - cy;
+            // この (dx,dy) で許される dz² の上限。下半分は楕円体(お椀)、それ以外は真球。
+            const maxDz2 = (isBomb && dyo < 0)
+                ? R2 * (1 - (dyo * dyo) / Rv2) - dx2
+                : R2 - dx2 - dyo * dyo;
+            if (maxDz2 < 0) continue;
+            const dzMax = Math.sqrt(maxDz2);
+            const zlo = Math.ceil(cz - dzMax), zhi = Math.floor(cz + dzMax);
+            for (let z = zlo; z <= zhi; z++) {
+                const cxc = Math.floor(x / CS), cyc = Math.floor(y / CS), czc = Math.floor(z / CS);
+                if (cxc !== pcx || cyc !== pcy || czc !== pcz) {       // チャンク境界をまたいだ時だけ解決
+                    pcx = cxc; pcy = cyc; pcz = czc;
+                    pck = chunkKey(cxc, cyc, czc);
+                    pch = chunks[pck] || null;
+                    pgen = !!(pch && pch.generated);
+                    pbx = cxc * CS; pby = cyc * CS; pbz = czc * CS;
+                    pedit = editsByChunk[pck] || null;                 // 既存editがある時だけ後で衝突削除
+                }
+                // 未生成域：爆弾はイベントが生成時に再カーブするので何もしない。通常爆発のみ撤去editを記録。
+                if (!pgen) { if (!isBomb) carveUnloaded(x, y, z); continue; }
+
+                const idx = ((y - pby) * CS + (z - pbz)) * CS + (x - pbx);
+                const t = pch.data[idx];
+                if (!t || t === BLOCKS.BEDROCK) continue;              // 空気・岩盤はそのまま
 
                 // 爆薬系は誘爆（連鎖）
                 if (t === BLOCKS.TNT || t === BLOCKS.MEGA_TNT || t === BLOCKS.NUKE || t === BLOCKS.HBOMB) {
@@ -346,16 +412,37 @@ function explode(cx, cy, cz, isMega = false, customRadius = null, bombKind = nul
                 }
 
                 // 破片パーティクルは見える地表付近だけ（地下に数千個作る無駄を回避）。
-                // 起伏地形では地表が y<0 の谷/裂け目にもなるので、爆心の高さも基準に含める。
                 if (y >= Math.min(SURFACE_Y, Math.floor(cy)) - 2 && Math.random() < (isBomb ? 0.06 : 0.3)) {
                     createBlockParticles(x, y, z, t, 2, 0.15);
                 }
-                removeBlock(x, y, z, true); // defer（dirty 化のみ・後で一括再構築）
+                // 撤去：data 直書き。dirty化は後でまとめて。
+                pch.data[idx] = 0;
+                if (isBomb) {
+                    // 永続化はイベント1件で行う（後で recordExplosionEvent）。per-block edit は記録しない。
+                    // ただし「設置済みブロックを爆破した」場合は、その設置editが生成時に復活しないよう削除する。
+                    if (pedit) { const k = getKey(x, y, z); if (k in pedit) delete pedit[k]; }
+                } else {
+                    (editsByChunk[pck] || (editsByChunk[pck] = {}))[getKey(x, y, z)] = 0; // 通常爆発は従来どおり
+                }
+                affected.add(pck);
             }
         }
     }
-    // クレーターに触れたチャンクをまとめて再構築（埋没ブロックの露出もここで反映される）
-    flushDirtyChunks();
+    _invalidateGetCache(); // data を直書きしたので getBlock のチャンクキャッシュを無効化
+
+    // 原爆/水爆はクレーターを「イベント1件」で永続化（チャンク再生成時に再カーブ＝掘削edit数万が不要）。
+    if (isBomb) recordExplosionEvent(cx, cy, cz, R, true);
+
+    // 掘り出した土砂が環状に積もる「縁の盛り上がり(リップ)」を再現（地表核爆発のみ・同じ affected に積む）
+    if (isBomb) buildCraterRim(cx, cy, cz, R, affected);
+
+    // 影響チャンク＋近傍をまとめて dirty 化。無予算 flush はしない＝animate が数フレームで消化して
+    // フリーズを回避（クレーターは爆発演出=フラッシュ/画面揺れの間に数フレームで完成する）。
+    for (const ck of affected) {
+        const p = ck.split(',');
+        markChunkAndNeighborsDirty(+p[0], +p[1], +p[2]);
+    }
+    if (typeof scheduleEditSave === 'function') scheduleEditSave();
 
     // Also push existing Primed TNTs (着火済みTNTを吹き飛ばす)
     const pushForceMultiplier = isBomb ? (bombKind === 'hbomb' ? 90 : 70) : (isMega ? 45 : 30);
