@@ -15,9 +15,9 @@ function getCollidingBlocks(playerPos) {
     for(let x=px-1; x<=px+1; x++) {
         for(let y=py-2; y<=py+2; y++) {
             for(let z=pz-1; z<=pz+1; z++) {
-                const key = getKey(x,y,z);
-                if(blockData[key]) {
-                    const props = BLOCK_PROPS[blockData[key]];
+                const bt = getBlock(x,y,z);
+                if(bt) {
+                    const props = BLOCK_PROPS[bt];
                     if (props && props.noCollide) continue;
 
                     const blockBox = new THREE.Box3(
@@ -43,9 +43,9 @@ function checkBlockCollision(pos, radius) {
     for (let x = px - 1; x <= px + 1; x++) {
         for (let y = py - 1; y <= py + 1; y++) {
             for (let z = pz - 1; z <= pz + 1; z++) {
-                const key = getKey(x, y, z);
-                if (blockData[key]) {
-                    const props = BLOCK_PROPS[blockData[key]];
+                const bt = getBlock(x, y, z);
+                if (bt) {
+                    const props = BLOCK_PROPS[bt];
                     if (props && props.noCollide) continue; // 水などはスキップ
 
                     // 簡易的な距離チェック

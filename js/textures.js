@@ -363,7 +363,8 @@ function initAtlas() {
     atlasTexture.wrapS = THREE.ClampToEdgeWrapping;
     atlasTexture.wrapT = THREE.ClampToEdgeWrapping;
 
-    solidMaterial = new THREE.MeshLambertMaterial({ map: atlasTexture });
+    // vertexColors=true: メッシャが焼いた AO(角の陰)＋天空光(地下を暗く)の頂点色を反映する。
+    solidMaterial = new THREE.MeshLambertMaterial({ map: atlasTexture, vertexColors: true });
     // 水は半透明で奥の地形が透ける。depthWrite=false で重なり順を自然に。
     waterMaterial = new THREE.MeshLambertMaterial({
         map: atlasTexture, transparent: true, opacity: 0.6,

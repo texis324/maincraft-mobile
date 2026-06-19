@@ -1,6 +1,12 @@
 // --- 1. Game Config & Performance Settings ---
-let WORLD_SIZE = 64;      // マップの一辺（再生成で変更可・スライダー 32〜128）
-let WORLD_DEPTH = 16;     // 最深部の地表より下に何層の石を生成するか（爆弾/裂け目で掘れる）
+// ★無限ワールド: 旧「WORLD_SIZE 固定の箱」を廃止。プレイヤー周囲のチャンクだけを動的生成し、
+//   遠方は破棄する。地形は terrainHeightAt/strataBlockAt が位置非依存＆決定的（worldSeed）なので
+//   どの順序で生成しても同じ世界になる。データは blockData(文字列キー巨大オブジェクト) →
+//   チャンクごとの Uint8Array に作り替え（数百万ブロックでも軽い・無限の前提）。
+const CHUNK_SIZE = 16;     // チャンク一辺（world.js のメッシュ単位）
+const CS = CHUNK_SIZE;     // 短縮
+let VIEW_DIST = 8;         // 描画距離（チャンク数・スライダー 4〜16）。旧 WORLD_SIZE の役目を置換
+let WORLD_DEPTH = 96;      // 海面より下、岩盤までの層数（本家マイクラ並みの深さ・スライダー 48〜192）
 let worldBottomY = -1;    // 岩盤の底のY（generateWorldで計算）
 const SURFACE_Y = 2;      // 基準の地表高（海面の高さでもある）。起伏はこの周辺に上下する
 const SEA_LEVEL = SURFACE_Y; // 海面。地表高がこれ未満の列は水で満たす（谷＝湖/海）
@@ -9,7 +15,8 @@ const WORLD_HEIGHT = 8;
 // --- 起伏地形（手続き生成）のチューニング ---
 // バリューノイズは中央(0.5)寄りなので、ダイナミックな起伏には大きめの振幅が要る
 let TERRAIN_HILL_AMP = 9;    // 細かい丘の振幅（高周波）
-let TERRAIN_MTN_AMP = 18;   // 大きな起伏=山/谷の振幅（低周波）
+let TERRAIN_MTN_AMP = 20;   // 大きな起伏=山/谷の振幅（低周波）
+let TERRAIN_CONT_AMP = 26;  // 大陸スケールの超低周波起伏（無限ワールドの探索に変化をつける）
 let TERRAIN_BASE = SEA_LEVEL + 7; // 平均的な陸の高さ（海面より上）＝大部分を陸地にし谷だけ湖に
 let worldSeed = 0;          // 0=未設定。generateWorld で乱数化（再生成で更新・persistで保存）
 let maxSurfaceY = SURFACE_Y; // 生成時に算出する最高地表Y（スポーン/カリング基準）

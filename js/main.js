@@ -49,8 +49,10 @@ function animate() {
         return;
     }
 
-    // 念のため未反映の dirty チャンクをこのフレームで構築（通常は各操作/爆破で即時 flush 済み）
-    flushDirtyChunks();
+    // ★無限ワールド: プレイヤー周囲のチャンクを動的生成し遠方を破棄。生成で増えた dirty を
+    //   このフレームの予算ぶんだけメッシュ化（残りは次フレーム＝歩いても重くなりすぎない）。
+    streamWorld(camera.position.x, camera.position.y, camera.position.z);
+    flushDirtyChunks(MESH_BUDGET);
 
     // Game Logic
     if (isLeftMouseDown && time - lastActionTime > getBreakDelay()) {
@@ -111,8 +113,7 @@ function animate() {
     if (controls.moveLeft || controls.moveRight) controls.velocity.x += controls.direction.x * currentSpeed * delta;
 
     // プレイヤーの足元のブロックを確認
-    const footBlockKey = getKey(Math.floor(camera.position.x), Math.floor(camera.position.y - 1.6), Math.floor(camera.position.z));
-    const isInWater = blockData[footBlockKey] === BLOCKS.WATER;
+    const isInWater = getBlock(Math.floor(camera.position.x), Math.floor(camera.position.y - 1.6), Math.floor(camera.position.z)) === BLOCKS.WATER;
 
     // 水に入った/出た検出
     if (isInWater && !wasInWater) {
@@ -154,11 +155,7 @@ function animate() {
         camera.position.z -= worldVelocityZ * delta;
     }
 
-    const limit = WORLD_SIZE / 2 - 0.5;
-    if (camera.position.x > limit) camera.position.x = limit;
-    if (camera.position.x < -limit) camera.position.x = -limit;
-    if (camera.position.z > limit) camera.position.z = limit;
-    if (camera.position.z < -limit) camera.position.z = -limit;
+    // ★無限ワールド: 旧 ±WORLD_SIZE/2 の壁クランプは撤去（どこまでも歩ける）。
 
     // 終端速度クランプ: 大爆発のノックバック等で落下/上昇速度が跳ね上がっても、
     // 1フレームの縦移動を床判定の範囲内(±約2ブロック)に抑え、すり抜け＝下方ワープを防ぐ。

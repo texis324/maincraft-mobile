@@ -56,7 +56,7 @@ if (mapDepthSlider) {
 const regenBtn = document.getElementById('btn-regenerate');
 if (regenBtn) {
     regenBtn.addEventListener('click', () => {
-        WORLD_SIZE = parseInt(mapSizeSlider.value);
+        VIEW_DIST = parseInt(mapSizeSlider.value);
         WORLD_DEPTH = parseInt(mapDepthSlider.value);
         regenerateWorld();
         // 再生成後はゲームに戻す

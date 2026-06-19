@@ -1,49 +1,70 @@
-// --- 5. World Generation（チャンクメッシュ化） ---
-// blockData: すべての固体ブロック（地中の埋没ブロック含む）を type で保持＝衝突/爆破/採掘の真実。
-// 描画は「世界を 16³ のチャンクに分割し、各チャンクの露出している面だけを 1 つの
-// BufferGeometry にマージ」する方式。draw call が『ブロック数』から『チャンク数(数十)』に激減し、
-// 一辺 128 でも 60fps を狙える。テクスチャは textures.js のアトラス（solidMaterial/waterMaterial）。
-//
-// 旧方式（1 ブロック = 1 THREE.Mesh）からの置き換え:
-//   - blockMeshes 配列 / chunks(key->mesh) / sharedBlockGeometry は廃止。
-//   - 採掘/設置/着弾のピッキングは intersectObjects ではなく voxelRaycast（DDA）。
-//   - 衝突判定(physics.js)は元から blockData 参照なので無改修。
+// --- 5. World Generation（無限ワールド / チャンク Uint8Array / ストリーミング） ---
+// ★大改造（無限ワールド化）:
+//   旧: blockData["x,y,z"]=type の単一巨大オブジェクト（固定 WORLD_SIZE の箱）。
+//   新: 世界を 16³ チャンクに分け、各チャンクは Uint8Array(16³) を持つ。プレイヤー周囲
+//       (VIEW_DIST チャンク) だけを動的生成し、遠方は破棄＝メモリ青天井を回避し無限に歩ける。
+//   地形は terrainHeightAt/strataBlockAt が位置非依存＆決定的(worldSeed)なので、どの順序で
+//   生成しても同じ世界になる。プレイヤーの改変は worldEdits(疎なマップ)に記録し、チャンクが
+//   再生成されても再適用される（アンロード→再ロードで建造物が消えない）。
+//   描画は従来どおり「露出面だけを 1 つの BufferGeometry にマージ」＋アトラス
+//   (solidMaterial/waterMaterial)。さらに頂点カラーで AO(角の陰)＋天空光(地下を暗く)を焼く。
 
-const blockData = {};                 // "x,y,z" -> type（固体の真実）
-const CHUNK_SIZE = 16;
-const chunkMeshes = {};               // "cx,cy,cz" -> { solid: Mesh|null, water: Mesh|null }
-const dirtyChunks = new Set();        // 再構築が必要なチャンクキー
-let bulkBuild = false;                // true の間 addBlock/removeBlock はメッシュ再構築をしない（生成/再生成用）
-
-function getKey(x, y, z) { return `${x},${y},${z}`; }
-function chunkKey(cx, cy, cz) { return `${cx},${cy},${cz}`; }
-function chunkOf(x, y, z) {
-    return chunkKey(Math.floor(x / CHUNK_SIZE), Math.floor(y / CHUNK_SIZE), Math.floor(z / CHUNK_SIZE));
+// ---- チャンクストア ----
+const CHUNK_VOL = CS * CS * CS;
+const chunks = {};                    // "cx,cy,cz" -> { cx,cy,cz, data:Uint8Array, generated, solid:Mesh|null, water:Mesh|null }
+const dirtyChunks = new Set();        // 再メッシュが必要なチャンクキー
+// プレイヤー/爆破の改変＝チャンク再生成でも保持。チャンク別索引にして「生成時に全edit走査」を回避
+// （大爆発で数万 edit 溜まっても、生成は自チャンク分だけ見る）。editsByChunk[ck] = { "x,y,z": type }
+const editsByChunk = {};
+function recordEdit(x, y, z, type) {
+    const ck = chunkOf(x, y, z);
+    (editsByChunk[ck] || (editsByChunk[ck] = {}))[getKey(x, y, z)] = type;
 }
 
-// 面カリング用：その type が「隣の面を隠す不透明固体」か。
-// 水は transparent+noCollide で非遮蔽。葉は BLOCK_PROPS にフラグが無い＝不透明扱い（旧仕様を踏襲）。
+function getKey(x, y, z) { return x + ',' + y + ',' + z; }
+function chunkKey(cx, cy, cz) { return cx + ',' + cy + ',' + cz; }
+function chunkCoord(v) { return Math.floor(v / CS); }
+function chunkOf(x, y, z) { return chunkKey(chunkCoord(x), chunkCoord(y), chunkCoord(z)); }
+function localIdx(lx, ly, lz) { return (ly * CS + lz) * CS + lx; }
+
+// getBlock 高速化: 直前にアクセスしたチャンクをキャッシュ（AO/天空光スキャンは同一チャンク連続が多い）。
+let _gcx = 2147483647, _gcy = 0, _gcz = 0, _gch = null;
+function _invalidateGetCache() { _gcx = 2147483647; _gch = null; }
+
+// (x,y,z) のブロック種別。未生成チャンク/空気は 0。
+function getBlock(x, y, z) {
+    const cx = Math.floor(x / CS), cy = Math.floor(y / CS), cz = Math.floor(z / CS);
+    if (cx !== _gcx || cy !== _gcy || cz !== _gcz) {
+        _gcx = cx; _gcy = cy; _gcz = cz;
+        _gch = chunks[chunkKey(cx, cy, cz)] || null;
+    }
+    const ch = _gch;
+    if (!ch || !ch.generated) return 0;
+    return ch.data[((y - cy * CS) * CS + (z - cz * CS)) * CS + (x - cx * CS)];
+}
+
+// 面カリング用：その type が「隣の面を隠す不透明固体」か。水・noCollide は非遮蔽。
 function isOpaque(type) {
     if (!type) return false;
     const p = BLOCK_PROPS[type];
     if (p && (p.transparent || p.noCollide)) return false;
     return true;
 }
+function isOpaqueAt(x, y, z) { return isOpaque(getBlock(x, y, z)); }
 
 // selfType のブロックが (nx,ny,nz) 方向の面を描くべきか。
-// ・ワールド底より下は遮蔽（裏面を描かない）
-// ・隣が空気＝描く / 隣が不透明＝隠れる / 隣が同種の半透明(水-水)＝隠す / それ以外の半透明＝描く
 function faceVisible(selfType, nx, ny, nz) {
     if (ny < worldBottomY) return false;
-    const nt = blockData[getKey(nx, ny, nz)];
+    const nt = getBlock(nx, ny, nz);
     if (!nt) return true;
     if (isOpaque(nt)) return false;
     if (nt === selfType) return false;
     return true;
 }
 
-// 立方体 6 面の定義。c=ローカル[0,1]の4隅、uv=各隅のタイル内UV(s,t)、slot=タイル種別、dir=外向き法線。
-// 巻き順は addFace 内で法線から自動補正するので、ここでは UV の向き（高 Y にテクスチャ上端）だけ合わせる。
+// ============================================================
+// メッシュ生成（露出面マージ＋頂点カラーで AO・天空光）
+// ============================================================
 const FACE_LIST = [
     { dir: [1, 0, 0],  slot: 'side',   c: [[1,0,0],[1,0,1],[1,1,1],[1,1,0]], uv: [[0,0],[1,0],[1,1],[0,1]] },
     { dir: [-1, 0, 0], slot: 'side',   c: [[0,0,1],[0,0,0],[0,1,0],[0,1,1]], uv: [[0,0],[1,0],[1,1],[0,1]] },
@@ -53,90 +74,43 @@ const FACE_LIST = [
     { dir: [0, 0, -1], slot: 'side',   c: [[1,0,0],[0,0,0],[0,1,0],[1,1,0]], uv: [[0,0],[1,0],[1,1],[0,1]] }
 ];
 
-// 4 隅を buffer へ。法線×外向きが負なら巻きを反転（表が外を向くよう自動補正）。
-function addFace(buf, corners, uvs, dir) {
+// --- 頂点ライティング ---
+// AO=角の陰（本家のスムースライティング）。各頂点で、面の外側プレーンにある「辺2隣＋対角」
+// の埋まり具合から 0..3 の暗さを決める。激安で立体感が劇的に増す。
+const AO_SHADE = [0.42, 0.62, 0.80, 1.0];
+function aoLevel(s1, s2, c) { if (s1 && s2) return 0; return 3 - (s1 + s2 + c); }
+// 天空光: そのセルの真上に不透明ブロックがどれだけ積もっているかで減光（地下・洞窟・裂け目の底が暗くなる）。
+// 横方向に伝播しない簡易版だが「掘っても明るすぎる」を最安で解消する。開けた空の下は 1.0。
+const SKY_SCAN = 18, SKY_DARK_AT = 7, SKY_MIN = 0.16;
+function cellSky(x, y, z) {
+    let cnt = 0;
+    for (let dy = 1; dy <= SKY_SCAN; dy++) {
+        if (isOpaqueAt(x, y + dy, z)) { cnt++; if (cnt >= SKY_DARK_AT) break; }
+    }
+    if (cnt === 0) return 1.0;
+    return 1 - (cnt / SKY_DARK_AT) * (1 - SKY_MIN);
+}
+
+// 4 隅を buffer へ。法線×外向きが負なら巻きを反転。col は各隅の明度(0..1)。
+function addFace(buf, corners, uvs, dir, cols) {
     const ax = corners[1][0] - corners[0][0], ay = corners[1][1] - corners[0][1], az = corners[1][2] - corners[0][2];
     const bx = corners[2][0] - corners[0][0], by = corners[2][1] - corners[0][1], bz = corners[2][2] - corners[0][2];
     const cxn = ay * bz - az * by, cyn = az * bx - ax * bz, czn = ax * by - ay * bx;
-    let c = corners, u = uvs;
+    let c = corners, u = uvs, g = cols;
     if (cxn * dir[0] + cyn * dir[1] + czn * dir[2] < 0) {
         c = [corners[3], corners[2], corners[1], corners[0]];
         u = [uvs[3], uvs[2], uvs[1], uvs[0]];
+        if (cols) g = [cols[3], cols[2], cols[1], cols[0]];
     }
     const base = buf.v;
     for (let k = 0; k < 4; k++) {
         buf.pos.push(c[k][0], c[k][1], c[k][2]);
         buf.nor.push(dir[0], dir[1], dir[2]);
         buf.uv.push(u[k][0], u[k][1]);
+        if (buf.col) { const s = g[k]; buf.col.push(s, s, s); }
     }
     buf.idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
     buf.v = base + 4;
-}
-
-// チャンク 1 つのジオメトリを作り直す。
-// cells を渡すと「そのチャンクに実在するブロックだけ」を走査する（生成/再生成の高速パス）。
-// 省略時は 16^3 を密に走査（採掘/設置/爆破の単一チャンク増分再構築用＝チャンク数が少ないので軽い）。
-function buildChunk(ck, cells) {
-    const old = chunkMeshes[ck];
-    if (old) {
-        if (old.solid) { scene.remove(old.solid); old.solid.geometry.dispose(); }
-        if (old.water) { scene.remove(old.water); old.water.geometry.dispose(); }
-    }
-
-    const parts = ck.split(',');
-    const cx = +parts[0], cy = +parts[1], cz = +parts[2];
-    const bx0 = cx * CHUNK_SIZE, by0 = cy * CHUNK_SIZE, bz0 = cz * CHUNK_SIZE;
-
-    const solid = { pos: [], nor: [], uv: [], idx: [], v: 0 };
-    const water = { pos: [], nor: [], uv: [], idx: [], v: 0 };
-    const stoneIdx = BLOCK_TILE_IDX[BLOCKS.STONE];
-
-    // 1セル分の露出面をバッファへ積む
-    function emitCell(x, y, z, t) {
-        const isWater = (t === BLOCKS.WATER);
-        const buf = isWater ? water : solid;
-        const tiles = BLOCK_TILE_IDX[t] || stoneIdx;
-        for (let f = 0; f < FACE_LIST.length; f++) {
-            const F = FACE_LIST[f];
-            const nx = x + F.dir[0], ny = y + F.dir[1], nz = z + F.dir[2];
-            if (!faceVisible(t, nx, ny, nz)) continue;
-
-            const rect = tileUV(tiles[F.slot]);
-            const du = rect.u1 - rect.u0, dv = rect.vTop - rect.vBot;
-            const corners = [], uvs = [];
-            for (let k = 0; k < 4; k++) {
-                const lx = F.c[k][0], ly = F.c[k][1], lz = F.c[k][2];
-                // 水は高さ 0.8（上面 y+0.3・底 y-0.5）で旧来の「水面が少し低い」見た目を維持
-                const wy = isWater ? (ly ? y + 0.3 : y - 0.5) : (y - 0.5 + ly);
-                corners.push([x - 0.5 + lx, wy, z - 0.5 + lz]);
-                uvs.push([rect.u0 + F.uv[k][0] * du, rect.vBot + F.uv[k][1] * dv]);
-            }
-            addFace(buf, corners, uvs, F.dir);
-        }
-    }
-
-    if (cells) {
-        for (let i = 0; i < cells.length; i++) {
-            const c = cells[i];
-            emitCell(c[0], c[1], c[2], c[3]);
-        }
-    } else {
-        for (let x = bx0; x < bx0 + CHUNK_SIZE; x++) {
-            for (let y = by0; y < by0 + CHUNK_SIZE; y++) {
-                for (let z = bz0; z < bz0 + CHUNK_SIZE; z++) {
-                    const t = blockData[getKey(x, y, z)];
-                    if (t) emitCell(x, y, z, t);
-                }
-            }
-        }
-    }
-
-    const entry = { solid: null, water: null };
-    if (solid.v > 0) entry.solid = makeChunkMesh(solid, solidMaterial);
-    if (water.v > 0) entry.water = makeChunkMesh(water, waterMaterial);
-
-    if (entry.solid || entry.water) chunkMeshes[ck] = entry;
-    else delete chunkMeshes[ck];
 }
 
 function makeChunkMesh(buf, material) {
@@ -144,11 +118,86 @@ function makeChunkMesh(buf, material) {
     g.setAttribute('position', new THREE.Float32BufferAttribute(buf.pos, 3));
     g.setAttribute('normal', new THREE.Float32BufferAttribute(buf.nor, 3));
     g.setAttribute('uv', new THREE.Float32BufferAttribute(buf.uv, 2));
+    if (buf.col && buf.col.length) g.setAttribute('color', new THREE.Float32BufferAttribute(buf.col, 3));
     g.setIndex(buf.idx);
     const mesh = new THREE.Mesh(g, material);
     mesh.frustumCulled = true;
     scene.add(mesh);
     return mesh;
+}
+
+// チャンク 1 つのジオメトリを作り直す（実在セルだけ走査）。
+function buildChunk(ck) {
+    const ch = chunks[ck];
+    if (!ch) return;
+    if (ch.solid) { scene.remove(ch.solid); ch.solid.geometry.dispose(); ch.solid = null; }
+    if (ch.water) { scene.remove(ch.water); ch.water.geometry.dispose(); ch.water = null; }
+    if (!ch.generated) return;
+
+    const bx0 = ch.cx * CS, by0 = ch.cy * CS, bz0 = ch.cz * CS;
+    const data = ch.data;
+    const solid = { pos: [], nor: [], uv: [], col: [], idx: [], v: 0 };
+    const water = { pos: [], nor: [], uv: [], idx: [], v: 0 };
+    const stoneIdx = BLOCK_TILE_IDX[BLOCKS.STONE];
+
+    for (let ly = 0; ly < CS; ly++) {
+        for (let lz = 0; lz < CS; lz++) {
+            for (let lx = 0; lx < CS; lx++) {
+                const t = data[localIdx(lx, ly, lz)];
+                if (!t) continue;
+                const x = bx0 + lx, y = by0 + ly, z = bz0 + lz;
+                const isWater = (t === BLOCKS.WATER);
+                const buf = isWater ? water : solid;
+                const tiles = BLOCK_TILE_IDX[t] || stoneIdx;
+                let sky = -1; // 遅延算出: 露出面が1つも無い埋設セルでは cellSky を一切呼ばない（深い世界の要）
+
+                for (let f = 0; f < 6; f++) {
+                    const F = FACE_LIST[f];
+                    const nx = x + F.dir[0], ny = y + F.dir[1], nz = z + F.dir[2];
+                    if (!faceVisible(t, nx, ny, nz)) continue;
+
+                    const rect = tileUV(tiles[F.slot]);
+                    const du = rect.u1 - rect.u0, dv = rect.vTop - rect.vBot;
+                    const corners = [], uvs = [], cols = isWater ? null : [];
+                    if (cols && sky < 0) sky = cellSky(x, y, z); // 最初の可視面でだけ算出
+                    for (let k = 0; k < 4; k++) {
+                        const lxx = F.c[k][0], lyy = F.c[k][1], lzz = F.c[k][2];
+                        const wy = isWater ? (lyy ? y + 0.3 : y - 0.5) : (y - 0.5 + lyy);
+                        corners.push([x - 0.5 + lxx, wy, z - 0.5 + lzz]);
+                        uvs.push([rect.u0 + F.uv[k][0] * du, rect.vBot + F.uv[k][1] * dv]);
+                        if (cols) cols.push(sky * cornerAO(x, y, z, F.dir, lxx, lyy, lzz));
+                    }
+                    addFace(buf, corners, uvs, F.dir, cols);
+                }
+            }
+        }
+    }
+
+    if (solid.v > 0) ch.solid = makeChunkMesh(solid, solidMaterial);
+    if (water.v > 0) ch.water = makeChunkMesh(water, waterMaterial);
+}
+
+// AO 用の遮蔽判定。未生成チャンクのセルは「不透明」とみなす＝境界の隅が明るく浮く継ぎ目を防ぐ
+// （隣チャンクが後でロードされても 6面 dirty では対角は再メッシュされないため。暗めに倒すと自然な陰に見える）。
+function aoSolid(x, y, z) {
+    const cx = Math.floor(x / CS), cy = Math.floor(y / CS), cz = Math.floor(z / CS);
+    const ch = chunks[chunkKey(cx, cy, cz)];
+    if (!ch || !ch.generated) return true;
+    return isOpaque(ch.data[((y - cy * CS) * CS + (z - cz * CS)) * CS + (x - cx * CS)]);
+}
+// 面の外側プレーンで、この隅(lxx,lyy,lzz)に接する辺2隣＋対角の埋まり具合から AO 明度を返す。
+function cornerAO(x, y, z, dir, lxx, lyy, lzz) {
+    // 面の外側1層へ進む基準
+    const ox = x + dir[0], oy = y + dir[1], oz = z + dir[2];
+    // 隅の符号（-1 or +1）を面プレーン上の2軸について求める
+    let u, v; // 面に平行な2つの軸（単位ベクトル）と、その隅方向の符号
+    if (dir[0] !== 0) { u = [0, lyy ? 1 : -1, 0]; v = [0, 0, lzz ? 1 : -1]; }
+    else if (dir[1] !== 0) { u = [lxx ? 1 : -1, 0, 0]; v = [0, 0, lzz ? 1 : -1]; }
+    else { u = [lxx ? 1 : -1, 0, 0]; v = [0, lyy ? 1 : -1, 0]; }
+    const s1 = aoSolid(ox + u[0], oy + u[1], oz + u[2]) ? 1 : 0;
+    const s2 = aoSolid(ox + v[0], oy + v[1], oz + v[2]) ? 1 : 0;
+    const c  = aoSolid(ox + u[0] + v[0], oy + u[1] + v[1], oz + u[2] + v[2]) ? 1 : 0;
+    return AO_SHADE[aoLevel(s1, s2, c)];
 }
 
 // ブロック変更時に影響チャンクを dirty 化（境界面は隣チャンクにも属するので 6 近傍も）
@@ -158,66 +207,77 @@ function markDirty(x, y, z) {
     dirtyChunks.add(chunkOf(x, y + 1, z)); dirtyChunks.add(chunkOf(x, y - 1, z));
     dirtyChunks.add(chunkOf(x, y, z + 1)); dirtyChunks.add(chunkOf(x, y, z - 1));
 }
+function markChunkAndNeighborsDirty(cx, cy, cz) {
+    dirtyChunks.add(chunkKey(cx, cy, cz));
+    dirtyChunks.add(chunkKey(cx + 1, cy, cz)); dirtyChunks.add(chunkKey(cx - 1, cy, cz));
+    dirtyChunks.add(chunkKey(cx, cy + 1, cz)); dirtyChunks.add(chunkKey(cx, cy - 1, cz));
+    dirtyChunks.add(chunkKey(cx, cy, cz + 1)); dirtyChunks.add(chunkKey(cx, cy, cz - 1));
+}
 
-function flushDirtyChunks() {
+// dirty チャンクを再メッシュ。limit を渡すとその数だけ（ストリーミング中の予算制御）。未生成は捨てる。
+function flushDirtyChunks(limit) {
     if (dirtyChunks.size === 0) return;
-    for (const ck of dirtyChunks) buildChunk(ck);
-    dirtyChunks.clear();
-}
-
-// blockData にあるブロックを含む全チャンクを一括構築（生成/再生成用）。
-// 1パスでブロックをチャンク別に振り分け、各チャンクは実在セルだけを走査する（空セル総当たり回避）。
-function buildAllChunks() {
-    const groups = {};
-    for (const key in blockData) {
-        const p = key.split(',');
-        const x = +p[0], y = +p[1], z = +p[2];
-        const ck = chunkOf(x, y, z);
-        (groups[ck] || (groups[ck] = [])).push([x, y, z, blockData[key]]);
+    let n = 0;
+    for (const ck of dirtyChunks) {
+        const ch = chunks[ck];
+        if (ch && ch.generated) buildChunk(ck);
+        dirtyChunks.delete(ck);
+        if (limit !== undefined && ++n >= limit) return;
     }
-    for (const ck in groups) buildChunk(ck, groups[ck]);
-    dirtyChunks.clear();
 }
 
-// プレイヤー設置・木・家など（データ登録＋メッシュ反映）
-function addBlock(x, y, z, type) {
-    const key = getKey(x, y, z);
-    if (blockData[key]) return;
-    blockData[key] = type;
-    if (bulkBuild) return;
-    markDirty(x, y, z);
-    flushDirtyChunks();
+// ---- 書き込み（プレイヤー設置/採掘/爆破・worldEdits に記録して永続化） ----
+function setBlockData(x, y, z, type) {
+    const cx = Math.floor(x / CS), cy = Math.floor(y / CS), cz = Math.floor(z / CS);
+    const ck = chunkKey(cx, cy, cz);
+    let ch = chunks[ck];
+    if (!ch) ch = ensureChunk(cx, cy, cz);     // 未生成域への改変＝先に生成してから書く
+    else if (!ch.generated) generateChunk(ch);
+    ch.data[((y - cy * CS) * CS + (z - cz * CS)) * CS + (x - cx * CS)] = type;
+    _invalidateGetCache();
 }
 
-// ブロック削除。defer=true なら即再構築せず dirty 化だけ（爆破の一括処理用）。
-function removeBlock(x, y, z, defer) {
-    const key = getKey(x, y, z);
-    if (blockData[key] === undefined) return;
-    delete blockData[key];
-    if (bulkBuild) return;
+function setBlock(x, y, z, type, defer) {
+    setBlockData(x, y, z, type);
+    recordEdit(x, y, z, type);                 // 0=撤去も記録（再生成で再適用される）
     markDirty(x, y, z);
     if (!defer) flushDirtyChunks();
 }
 
+function addBlock(x, y, z, type) {
+    if (getBlock(x, y, z)) return;
+    setBlock(x, y, z, type, false);
+}
+function removeBlock(x, y, z, defer) {
+    if (getBlock(x, y, z) === 0) return;
+    setBlock(x, y, z, 0, defer);
+}
+
+// 爆発が未生成/アンロード済みチャンクに当たった時用。チャンクを生成せず（＝遠方でフリーズしない）
+// 「自然地形なら固体だったはず」のセルだけ撤去 edit を記録＝後でそのチャンクが生成された時に
+// クレーターが復元する。ロード済みなら何もしない（その場合は通常の removeBlock 経路が処理済み）。
+function carveUnloaded(x, y, z) {
+    const ch = chunks[chunkOf(x, y, z)];
+    if (ch && ch.generated) return;
+    if (y > worldBottomY && y <= terrainHeightAt(x, z)) recordEdit(x, y, z, 0); // 岩盤(worldBottomY)は残す
+}
+
 // 世界を空にする（再生成用。共有マテリアル/アトラスは破棄しない）
 function clearWorld() {
-    for (const ck in chunkMeshes) {
-        const c = chunkMeshes[ck];
-        if (c.solid) { scene.remove(c.solid); c.solid.geometry.dispose(); }
-        if (c.water) { scene.remove(c.water); c.water.geometry.dispose(); }
-        delete chunkMeshes[ck];
+    for (const ck in chunks) {
+        const ch = chunks[ck];
+        if (ch.solid) { scene.remove(ch.solid); ch.solid.geometry.dispose(); }
+        if (ch.water) { scene.remove(ch.water); ch.water.geometry.dispose(); }
+        delete chunks[ck];
     }
-    for (const k in blockData) delete blockData[k];
+    for (const k in editsByChunk) delete editsByChunk[k];
     dirtyChunks.clear();
+    _invalidateGetCache();
 }
 
 // ============================================================
-// 手続き地形生成（ノイズ・地層・裂け目）
-// 外部ライブラリ無しの決定的バリューノイズ。worldSeed で再現性を持たせる。
+// 手続き地形（決定的ノイズ・地層・領域決定的な裂け目）
 // ============================================================
-function getKey2(x, z) { return x + ',' + z; }
-
-// 整数格子点のハッシュ -> [0,1)
 function wnHash(ix, iy, iz, seed) {
     let h = Math.imul(ix | 0, 374761393) + Math.imul(iy | 0, 668265263) +
             Math.imul(iz | 0, 2147483647) + Math.imul(seed | 0, 362437);
@@ -228,7 +288,6 @@ function wnHash(ix, iy, iz, seed) {
 }
 function wnSmooth(t) { return t * t * (3 - 2 * t); }
 
-// 2D バリューノイズ [0,1)
 function valueNoise2(x, z, seed) {
     const x0 = Math.floor(x), z0 = Math.floor(z);
     const fx = x - x0, fz = z - z0;
@@ -240,7 +299,6 @@ function valueNoise2(x, z, seed) {
     return a + (b - a) * sz;
 }
 
-// 3D バリューノイズ [0,1)（鉱石ポケットの配置用）
 function valueNoise3(x, y, z, seed) {
     const x0 = Math.floor(x), y0 = Math.floor(y), z0 = Math.floor(z);
     const fx = x - x0, fy = y - y0, fz = z - z0;
@@ -255,7 +313,6 @@ function valueNoise3(x, y, z, seed) {
     return y0v + (y1v - y0v) * sz;
 }
 
-// fractal Brownian motion（2D・[0,1)）
 function fbm2(x, z, seed, octaves) {
     let amp = 1, freq = 1, sum = 0, norm = 0;
     for (let o = 0; o < octaves; o++) {
@@ -266,18 +323,19 @@ function fbm2(x, z, seed, octaves) {
     return sum / norm;
 }
 
-// 列 (x,z) の地表高（整数Y）。worldSeed で決定。
+// 列 (x,z) の地表高（整数Y）。worldSeed で決定・位置非依存＝無限ワールドの土台。
 function terrainHeightAt(x, z) {
     const hills = fbm2(x * 0.025, z * 0.025, worldSeed, 4);                       // 細かい起伏
-    const mountains = fbm2(x * 0.008 + 99, z * 0.008 + 99, worldSeed + 7777, 3);  // 大地形（山/谷）
+    const mountains = fbm2(x * 0.008 + 99, z * 0.008 + 99, worldSeed + 7777, 3);  // 山/谷
+    const continent = fbm2(x * 0.0022 + 311, z * 0.0022 + 311, worldSeed + 4242, 2); // 大陸スケール
     const h = TERRAIN_BASE
         + (hills - 0.5) * 2 * TERRAIN_HILL_AMP
-        + (mountains - 0.5) * 2 * TERRAIN_MTN_AMP;
+        + (mountains - 0.5) * 2 * TERRAIN_MTN_AMP
+        + (continent - 0.5) * 2 * TERRAIN_CONT_AMP;
     return Math.round(h);
 }
 
-// シード付きRNG（mulberry32）。裂け目の配置に使う（seedで再現可能）。
-function makeRng(seed) {
+function mulberry32(seed) {
     let a = seed >>> 0;
     return function () {
         a = (a + 0x6D2B79F5) | 0;
@@ -287,21 +345,16 @@ function makeRng(seed) {
     };
 }
 
-// (x,y,z) と列の地表高 h からブロック種別（地層）を決める
+// (x,y,z) と列の地表高 h からブロック種別（地層）
 function strataBlockAt(x, y, z, h) {
-    const d = h - y;                       // 地表からの深さ（0=地表）
-    const beach = (h <= SEA_LEVEL + 1);    // 海面近く＝砂浜/浅瀬の底
-
-    if (d === 0) {                          // 地表
-        if (h < SEA_LEVEL) return BLOCKS.SAND;   // 水没した湖底
+    const d = h - y;
+    const beach = (h <= SEA_LEVEL + 1);
+    if (d === 0) {
+        if (h < SEA_LEVEL) return BLOCKS.SAND;
         return beach ? BLOCKS.SAND : BLOCKS.GRASS;
     }
-    if (d <= 3) {                           // 表土（土 or 砂岩）
-        return beach ? BLOCKS.SANDSTONE : BLOCKS.DIRT;
-    }
-    if (y <= worldBottomY + 5) return BLOCKS.DEEPSLATE; // 最深部の深層岩
-
-    // 石＋鉱石ポケット（花崗岩/閃緑岩/安山岩）
+    if (d <= 3) return beach ? BLOCKS.SANDSTONE : BLOCKS.DIRT;
+    if (y <= worldBottomY + 5) return BLOCKS.DEEPSLATE;
     const pocket = valueNoise3(x * 0.09, y * 0.09, z * 0.09, worldSeed + 31);
     if (pocket > 0.72) {
         const which = valueNoise3(x * 0.05, y * 0.05, z * 0.05, worldSeed + 53);
@@ -312,71 +365,289 @@ function strataBlockAt(x, y, z, h) {
     return BLOCKS.STONE;
 }
 
-// 1本の裂け目（ravine）を彫る。蛇行しながら細く深いV字の溝を掘り、断面に地層を露出させる。
-function carveRavine(rng) {
-    const half = Math.floor(WORLD_SIZE / 2);
-    let cx = (rng() * 2 - 1) * half * 0.5;
-    let cz = (rng() * 2 - 1) * half * 0.5;
+// ---- 領域決定的な裂け目（ravine） ----
+// 世界を RAVINE_REGION ごとに区切り、各領域がハッシュで 0/1 本の裂け目を持つ。経路は決定的に
+// 生成し、各チャンクは「自分に重なる経路の区間だけ」を彫る＝生成順に依存しない無限の裂け目。
+const RAVINE_REGION = 176;
+const RAVINE_REGION_PROB = 0.55;
+const RAVINE_DEPTH_MIN = 26, RAVINE_DEPTH_VAR = 30; // 本家並みに深く（旧 14+12 → 大幅増）
+const _ravineCache = {};               // "rgx,rgz" -> {path, minX,maxX,minZ,maxZ} | null
+
+function ravineForRegion(rgx, rgz) {
+    const rk = rgx + ',' + rgz;
+    if (rk in _ravineCache) return _ravineCache[rk];
+    const rng = mulberry32((wnHash(rgx, 777, rgz, worldSeed ^ 0x9e3779b9) * 4294967296) >>> 0);
+    if (rng() > RAVINE_REGION_PROB) { _ravineCache[rk] = null; return null; }
+    let cx = rgx * RAVINE_REGION + RAVINE_REGION * (0.2 + rng() * 0.6);
+    let cz = rgz * RAVINE_REGION + RAVINE_REGION * (0.2 + rng() * 0.6);
     let ang = rng() * Math.PI * 2;
-    const steps = Math.floor(WORLD_SIZE * (0.8 + rng() * 0.6));
-    const maxHalfW = 2.0 + rng() * 2.5;            // 横半幅の最大（中央で最大・端で細る）
-    const maxDepth = 14 + Math.floor(rng() * 12);  // 深さ
+    const steps = 70 + Math.floor(rng() * 60);
+    const maxHalfW = 2.5 + rng() * 3.0;
+    const maxDepth = RAVINE_DEPTH_MIN + Math.floor(rng() * RAVINE_DEPTH_VAR);
+    const path = [];
+    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
     for (let s = 0; s < steps; s++) {
         const tt = s / steps;
-        const taper = Math.sin(tt * Math.PI);      // 端で0・中央で1
+        const taper = Math.sin(tt * Math.PI);
         const halfW = 0.8 + maxHalfW * taper;
         const centerSurf = terrainHeightAt(Math.round(cx), Math.round(cz));
-        const botY = Math.max(worldBottomY + 2, centerSurf - Math.floor(4 + maxDepth * taper));
-        const px = -Math.sin(ang), pz = Math.cos(ang); // 進行方向に直交
-        for (let w = -halfW; w <= halfW; w += 0.5) {
-            const ix = Math.round(cx + px * w);
-            const iz = Math.round(cz + pz * w);
-            const colSurf = terrainHeightAt(ix, iz);   // 列ごとの天面（オーバーハング防止）
-            const denom = Math.max(1, centerSurf - botY);
-            // 水没列は水面(SEA_LEVEL)まで掘る。さもないと水の塊が宙に浮く（地面だけ消えて水が残る）
-            const colTop = Math.max(colSurf + 1, SEA_LEVEL);
-            for (let y = colTop; y >= botY; y--) {
-                const yt = (y - botY) / denom;          // 0=底 1=天面
-                const localW = halfW * (0.3 + 0.7 * Math.max(0, Math.min(1, yt))); // 深いほど狭まる
-                if (Math.abs(w) <= localW) {
-                    const k = getKey(ix, y, iz);
-                    const t = blockData[k];
-                    if (t && t !== BLOCKS.BEDROCK) delete blockData[k];
+        const botY = Math.max(worldBottomY + 2, centerSurf - Math.floor(6 + maxDepth * taper));
+        path.push({ cx: cx, cz: cz, ang: ang, halfW: halfW, botY: botY, centerSurf: centerSurf });
+        const m = halfW + 1;
+        if (cx - m < minX) minX = cx - m; if (cx + m > maxX) maxX = cx + m;
+        if (cz - m < minZ) minZ = cz - m; if (cz + m > maxZ) maxZ = cz + m;
+        ang += (valueNoise2(s * 0.08, rgx * 7 + rgz * 13, worldSeed + 13) - 0.5) * 0.5;
+        cx += Math.cos(ang); cz += Math.sin(ang);
+    }
+    const r = { path: path, minX: minX, maxX: maxX, minZ: minZ, maxZ: maxZ };
+    _ravineCache[rk] = r;
+    return r;
+}
+
+// チャンク ch のセル(data)に、近傍領域の裂け目を彫る（空気=0 にする）。
+function carveRavinesInChunk(ch) {
+    const bx0 = ch.cx * CS, by0 = ch.cy * CS, bz0 = ch.cz * CS;
+    const bx1 = bx0 + CS - 1, by1 = by0 + CS - 1, bz1 = bz0 + CS - 1;
+    const crgx = Math.floor((bx0 + CS / 2) / RAVINE_REGION);
+    const crgz = Math.floor((bz0 + CS / 2) / RAVINE_REGION);
+    for (let rgx = crgx - 1; rgx <= crgx + 1; rgx++) {
+        for (let rgz = crgz - 1; rgz <= crgz + 1; rgz++) {
+            const rav = ravineForRegion(rgx, rgz);
+            if (!rav) continue;
+            if (rav.maxX < bx0 || rav.minX > bx1 || rav.maxZ < bz0 || rav.minZ > bz1) continue;
+            const path = rav.path;
+            for (let s = 0; s < path.length; s++) {
+                const st = path[s];
+                const px = -Math.sin(st.ang), pz = Math.cos(st.ang);
+                const denom = Math.max(1, st.centerSurf - st.botY);
+                for (let w = -st.halfW; w <= st.halfW; w += 0.5) {
+                    const ix = Math.round(st.cx + px * w);
+                    const iz = Math.round(st.cz + pz * w);
+                    if (ix < bx0 || ix > bx1 || iz < bz0 || iz > bz1) continue;
+                    const colSurf = terrainHeightAt(ix, iz);
+                    const colTop = Math.max(colSurf + 1, SEA_LEVEL);
+                    const yHi = Math.min(colTop, by1);
+                    const yLo = Math.max(st.botY, by0);
+                    const aw = Math.abs(w);
+                    for (let y = yHi; y >= yLo; y--) {
+                        const yt = (y - st.botY) / denom;
+                        const localW = st.halfW * (0.3 + 0.7 * Math.max(0, Math.min(1, yt)));
+                        if (aw <= localW) {
+                            const idx = ((y - by0) * CS + (iz - bz0)) * CS + (ix - bx0);
+                            const t = ch.data[idx];
+                            if (t && t !== BLOCKS.BEDROCK) ch.data[idx] = 0;
+                        }
+                    }
                 }
             }
         }
-        ang += (valueNoise2(s * 0.08, 50, worldSeed + 13) - 0.5) * 0.5; // 蛇行
-        cx += Math.cos(ang);
-        cz += Math.sin(ang);
-        if (Math.abs(cx) > half - 2 || Math.abs(cz) > half - 2) break;
+    }
+}
+
+// ---- 決定的な木 ----
+const TREE_MARGIN = 2;
+function houseZone(x, z) { return (x >= 3 && x <= 11 && z >= 3 && z <= 11); }
+function treeAt(wx, wz) {
+    if (houseZone(wx, wz)) return false;
+    const h = terrainHeightAt(wx, wz);
+    if (h < SEA_LEVEL + 1) return false;
+    if (strataBlockAt(wx, h, wz, h) !== BLOCKS.GRASS) return false;
+    return wnHash(wx, 4321, wz, worldSeed + 99) < 0.03;
+}
+function forEachTreeBlock(x, y, z, cb) { // y=幹の最下段(地表+1)
+    for (let i = 0; i < 4; i++) cb(x, y + i, z, BLOCKS.WOOD);
+    for (let lx = x - 2; lx <= x + 2; lx++)
+        for (let lz = z - 2; lz <= z + 2; lz++)
+            for (let ly = y + 2; ly <= y + 3; ly++) {
+                if (Math.abs(lx - x) === 2 && Math.abs(lz - z) === 2) continue;
+                cb(lx, ly, lz, BLOCKS.LEAVES);
+            }
+    for (let lx = x - 1; lx <= x + 1; lx++)
+        for (let lz = z - 1; lz <= z + 1; lz++) cb(lx, y + 4, lz, BLOCKS.LEAVES);
+    cb(x, y + 5, z, BLOCKS.LEAVES);
+}
+function placeTreesInChunk(ch) {
+    const bx0 = ch.cx * CS, by0 = ch.cy * CS, bz0 = ch.cz * CS;
+    const bx1 = bx0 + CS - 1, by1 = by0 + CS - 1, bz1 = bz0 + CS - 1;
+    for (let wx = bx0 - TREE_MARGIN; wx <= bx1 + TREE_MARGIN; wx++) {
+        for (let wz = bz0 - TREE_MARGIN; wz <= bz1 + TREE_MARGIN; wz++) {
+            if (!treeAt(wx, wz)) continue;
+            const base = terrainHeightAt(wx, wz) + 1;
+            forEachTreeBlock(wx, base, wz, (bx, by, bz, type) => {
+                if (bx < bx0 || bx > bx1 || by < by0 || by > by1 || bz < bz0 || bz > bz1) return;
+                const idx = ((by - by0) * CS + (bz - bz0)) * CS + (bx - bx0);
+                if (ch.data[idx] === 0) ch.data[idx] = type; // 空気だけに（幹/既存を侵食しない）
+            });
+        }
+    }
+}
+
+// このチャンクの edit を再適用（プレイヤー改変/家の永続）。自チャンク分だけ見る＝高速。
+function applyEditsToChunk(ch) {
+    const e = editsByChunk[chunkKey(ch.cx, ch.cy, ch.cz)];
+    if (!e) return;
+    const bx0 = ch.cx * CS, by0 = ch.cy * CS, bz0 = ch.cz * CS;
+    for (const key in e) {
+        const p = key.split(',');
+        const x = +p[0], y = +p[1], z = +p[2];
+        ch.data[((y - by0) * CS + (z - bz0)) * CS + (x - bx0)] = e[key];
+    }
+}
+
+// ---- チャンク生成 ----
+function generateChunk(ch) {
+    const bx0 = ch.cx * CS, by0 = ch.cy * CS, bz0 = ch.cz * CS;
+    const data = ch.data;
+    for (let lz = 0; lz < CS; lz++) {
+        for (let lx = 0; lx < CS; lx++) {
+            const wx = bx0 + lx, wz = bz0 + lz;
+            const h = terrainHeightAt(wx, wz);
+            for (let ly = 0; ly < CS; ly++) {
+                const wy = by0 + ly;
+                let t = 0;
+                if (wy < worldBottomY) t = 0;
+                else if (wy === worldBottomY) t = BLOCKS.BEDROCK;
+                else if (wy <= h) t = strataBlockAt(wx, wy, wz, h);
+                else if (wy <= SEA_LEVEL) t = BLOCKS.WATER;
+                data[localIdx(lx, ly, lz)] = t;
+            }
+        }
+    }
+    carveRavinesInChunk(ch);
+    placeTreesInChunk(ch);
+    applyEditsToChunk(ch);
+    ch.generated = true;
+    _invalidateGetCache();
+}
+
+// チャンクを作って生成。生成後は自分＋6近傍を dirty 化（境界面の再カリング）。
+function ensureChunk(cx, cy, cz) {
+    const ck = chunkKey(cx, cy, cz);
+    let ch = chunks[ck];
+    if (ch && ch.generated) return ch;
+    if (!ch) {
+        ch = { cx: cx, cy: cy, cz: cz, data: new Uint8Array(CHUNK_VOL), generated: false, solid: null, water: null };
+        chunks[ck] = ch;
+    }
+    generateChunk(ch);
+    markChunkAndNeighborsDirty(cx, cy, cz);
+    return ch;
+}
+
+function unloadChunk(ck) {
+    const ch = chunks[ck];
+    if (!ch) return;
+    if (ch.solid) { scene.remove(ch.solid); ch.solid.geometry.dispose(); }
+    if (ch.water) { scene.remove(ch.water); ch.water.geometry.dispose(); }
+    delete chunks[ck];
+    dirtyChunks.delete(ck);
+    _invalidateGetCache();
+}
+
+// ---- ストリーミング ----
+let _minCY = -6, _maxCY = 4;
+const LOAD_DEPTH = 72;          // 各列で地表からこの深さまでは常時ロード（深い裂け目も見えるように）
+const UNLOAD_MARGIN = 2;        // 水平のアンロード余白（ヒステリシス）
+const GEN_BUDGET = 4;           // 1フレームに生成するチャンク上限
+const MESH_BUDGET = 6;          // 1フレームに再メッシュするチャンク上限（移動中の追いつき優先）
+const MAX_VIEW = 16;            // VIEW_DIST の上限（スパイラル事前計算用）
+let _spiral = null;
+let _lastPcx = 2147483647, _lastPcy = 0, _lastPcz = 0; // 直近のプレイヤーチャンク
+let _streamSettled = false;    // 視界内が全て生成済み＝今フレームの生成走査をスキップ
+
+function buildSpiral() {
+    const arr = [];
+    for (let dx = -MAX_VIEW; dx <= MAX_VIEW; dx++)
+        for (let dz = -MAX_VIEW; dz <= MAX_VIEW; dz++)
+            arr.push({ dx: dx, dz: dz, cheb: Math.max(Math.abs(dx), Math.abs(dz)), d2: dx * dx + dz * dz });
+    arr.sort((a, b) => a.d2 - b.d2);
+    _spiral = arr;
+}
+
+// その列(チャンク)で常時ロードする垂直チャンク範囲 [cyBot, cyTop]
+function columnLoadRange(ccx, ccz) {
+    const surf = terrainHeightAt(ccx * CS + (CS >> 1), ccz * CS + (CS >> 1));
+    const top = Math.max(surf, SEA_LEVEL) + 8;
+    const bot = surf - LOAD_DEPTH;
+    let cyTop = Math.floor(top / CS), cyBot = Math.floor(bot / CS);
+    if (cyTop > _maxCY) cyTop = _maxCY;
+    if (cyBot < _minCY) cyBot = _minCY;
+    return [cyBot, cyTop];
+}
+
+// プレイヤー周囲の未生成チャンクを近い順に生成し、遠方をアンロード。
+function streamWorld(px, py, pz) {
+    if (!_spiral) buildSpiral();
+    const pcx = Math.floor(px / CS), pcy = Math.floor(py / CS), pcz = Math.floor(pz / CS);
+    const moved = (pcx !== _lastPcx || pcy !== _lastPcy || pcz !== _lastPcz);
+    if (moved) _streamSettled = false;
+    if (!moved && _streamSettled) return;   // 視界内は全生成済み＆移動無し＝走査スキップ（定常の空回り回避）
+    _lastPcx = pcx; _lastPcy = pcy; _lastPcz = pcz;
+
+    let gen = 0, pending = false;
+    for (let i = 0; i < _spiral.length && !pending; i++) {
+        const o = _spiral[i];
+        if (o.cheb > VIEW_DIST) break;
+        const ccx = pcx + o.dx, ccz = pcz + o.dz;
+        const range = columnLoadRange(ccx, ccz);
+        let cyLo = range[0], cyHi = range[1];
+        // プレイヤーの上下も追加（掘り下げ/上昇で周囲が見えるように）
+        if (pcy - 1 < cyLo) cyLo = Math.max(_minCY, pcy - 1);
+        if (pcy + 1 > cyHi) cyHi = Math.min(_maxCY, pcy + 1);
+        // 上(地表)から下へ＝予算制限下でも見える地表/近景が先に出現する
+        for (let ccy = cyHi; ccy >= cyLo; ccy--) {
+            const ch = chunks[chunkKey(ccx, ccy, ccz)];
+            if (!ch || !ch.generated) {
+                if (gen >= GEN_BUDGET) { pending = true; break; }
+                ensureChunk(ccx, ccy, ccz); gen++;
+            }
+        }
+    }
+    _streamSettled = !pending;                // 走査が予算で打ち切られず完了＝視界内は全生成済み
+    if (moved) _streamUnload(pcx, pcy, pcz);  // アンロードはチャンクを跨いだ時だけ（全チャンク走査の節約）
+}
+function _streamUnload(pcx, pcy, pcz) {
+    const far = VIEW_DIST + UNLOAD_MARGIN;
+    for (const ck in chunks) {
+        const ch = chunks[ck];
+        if (Math.max(Math.abs(ch.cx - pcx), Math.abs(ch.cz - pcz)) > far) { unloadChunk(ck); continue; }
+        // 垂直: 列のロード範囲＋プレイヤー近傍(±2のヒステリシス)から外れた深部/高所を破棄（掘り下げ後の漏れ防止）
+        const range = columnLoadRange(ch.cx, ch.cz);
+        if (ch.cy < Math.min(range[0], pcy - 2) || ch.cy > Math.max(range[1], pcy + 2)) unloadChunk(ck);
+    }
+    // ravine キャッシュの遠方領域を刈る（無限探索でのメモリリーク防止）
+    const rfar = Math.ceil((far * CS) / RAVINE_REGION) + 2;
+    const prgx = Math.floor((pcx * CS) / RAVINE_REGION), prgz = Math.floor((pcz * CS) / RAVINE_REGION);
+    for (const rk in _ravineCache) {
+        const c = rk.indexOf(',');
+        if (Math.abs(+rk.slice(0, c) - prgx) > rfar || Math.abs(+rk.slice(c + 1) - prgz) > rfar) delete _ravineCache[rk];
     }
 }
 
 // (x,z) 列の最上段の固体（非水）ブロックYを返す。無ければ worldBottomY。
 function columnTopY(x, z) {
     for (let y = maxSurfaceY + 2; y > worldBottomY; y--) {
-        const t = blockData[getKey(x, y, z)];
+        const t = getBlock(x, y, z);
         if (t && !(BLOCK_PROPS[t] && BLOCK_PROPS[t].noCollide)) return y;
     }
     return worldBottomY;
 }
-// 乾いた陸地のスポーン地点を中央付近から渦巻き状に探し、プレイヤーを配置する。
-// 中央が湖/裂け目だと水中に沈むので「海面以上の固体の天面」を最初に見つけた所へ。
+
+// 乾いた陸地のスポーン地点を中央付近から渦巻き状に探す（スポーン周辺は生成済み前提）。
 function spawnPlayer() {
-    const half = Math.floor(WORLD_SIZE / 2) - 2;
     let best = null, fallback = null;
-    for (let r = 0; r <= half && !best; r++) {
+    for (let r = 0; r <= 24 && !best; r++) {
         for (let dx = -r; dx <= r && !best; dx++) {
             for (let dz = -r; dz <= r && !best; dz++) {
-                if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue; // リング外周だけ走査
+                if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
                 const top = columnTopY(dx, dz);
                 if (top < SEA_LEVEL) continue;
-                const tb = blockData[getKey(dx, top, dz)];
-                if (tb === BLOCKS.WOOD || tb === BLOCKS.LEAVES) {  // 木/家の上は避ける
+                const tb = getBlock(dx, top, dz);
+                if (tb === BLOCKS.WOOD || tb === BLOCKS.LEAVES) {
                     if (!fallback) fallback = { x: dx, z: dz, y: top };
                     continue;
                 }
-                best = { x: dx, z: dz, y: top }; // 自然な地面の上を優先
+                best = { x: dx, z: dz, y: top };
             }
         }
     }
@@ -385,94 +656,74 @@ function spawnPlayer() {
     controls.velocity.set(0, 0, 0);
 }
 
+// ---- 開始時の家を worldEdits に焼く（決定的な位置・永続） ----
+function seedHouse() {
+    const hx = 5, hz = 5;
+    let baseY = terrainHeightAt(hx + 2, hz + 2);
+    if (baseY < SEA_LEVEL) baseY = SEA_LEVEL;
+    const edit = (x, y, z, t) => { recordEdit(x, y, z, t); };
+    for (let i = 0; i < 5; i++) {
+        for (let j = 0; j < 5; j++) {
+            const x = hx + i, z = hz + j;
+            for (let y = baseY + 1; y <= baseY + 8; y++) edit(x, y, z, 0);        // 上を空ける
+            for (let y = baseY - 4; y <= baseY; y++) edit(x, y, z, y === baseY ? BLOCKS.GRASS : BLOCKS.DIRT); // 平らな土台
+        }
+    }
+    seedHouseStructure(hx, baseY + 1, hz, edit);
+}
+function seedHouseStructure(x, y, z, edit) {
+    for (let i = 0; i < 5; i++) for (let j = 0; j < 5; j++) edit(x + i, y, z + j, BLOCKS.WOOD); // 床
+    for (let dy = 1; dy <= 3; dy++) {
+        for (let i = 0; i < 5; i++) {
+            for (let j = 0; j < 5; j++) {
+                if (i === 0 || i === 4 || j === 0 || j === 4) {
+                    if (dy < 3 && i === 2 && j === 0) continue;                 // ドア
+                    if (dy === 2 && (i === 0 || i === 4) && j === 2) continue;  // 窓
+                    edit(x + i, y + dy, z + j, BLOCKS.WOOD);
+                }
+            }
+        }
+    }
+    for (let i = 0; i < 5; i++) for (let j = 0; j < 5; j++) edit(x + i, y + 4, z + j, BLOCKS.LEAVES); // 屋根
+}
+
+// ---- 起動/再生成 ----
 let materialsReady = false;
+const BOOT_RADIUS = 2; // 起動時に同期生成する水平半径（残りはストリーミング）
+
+function recomputeVerticalBounds() {
+    worldBottomY = SEA_LEVEL - 1 - WORLD_DEPTH;
+    // 地表の理論最大高 = 中心(TERRAIN_BASE) + 全振幅。最高峰がチャンク垂直範囲(maxCY)から
+    // こぼれてクリップされないよう余白を足す（TERRAIN_BASE 基準・SEA_LEVEL 基準ではない）。
+    maxSurfaceY = TERRAIN_BASE + TERRAIN_HILL_AMP + TERRAIN_MTN_AMP + TERRAIN_CONT_AMP + 8;
+    _minCY = Math.floor(worldBottomY / CS);
+    _maxCY = Math.floor(maxSurfaceY / CS);
+}
 
 function generateWorld() {
     if (!materialsReady) { initMaterials(); materialsReady = true; }
     clearWorld();
+    for (const k in _ravineCache) delete _ravineCache[k]; // シード/深さ変更で裂け目も作り直し
+    _streamSettled = false; _lastPcx = 2147483647;        // 次フレームで必ず再ストリーミング
 
     if (!worldSeed) worldSeed = (Math.floor(Math.random() * 0x7fffffff)) || 12345;
+    recomputeVerticalBounds();
+    seedHouse(); // worldEdits に家を焼く（生成時に適用される）
 
-    const offset = Math.floor(WORLD_SIZE / 2);
-
-    // --- 1) 高さマップを先に算出（岩盤の底・スポーン・カリングの基準を決める） ---
-    const heights = {};
-    let minH = Infinity, maxH = -Infinity;
-    for (let x = -offset; x < offset; x++) {
-        for (let z = -offset; z < offset; z++) {
-            const h = terrainHeightAt(x, z);
-            heights[getKey2(x, z)] = h;
-            if (h < minH) minH = h;
-            if (h > maxH) maxH = h;
-        }
+    if (!_spiral) buildSpiral();
+    // スポーン周辺を同期生成（足元の地面＋近景）。残りは animate の streamWorld が埋める。
+    for (let i = 0; i < _spiral.length; i++) {
+        const o = _spiral[i];
+        if (o.cheb > BOOT_RADIUS) break;
+        const range = columnLoadRange(o.dx, o.dz);
+        for (let ccy = range[0]; ccy <= range[1]; ccy++) ensureChunk(o.dx, ccy, o.dz);
     }
-    const floorRef = Math.min(minH, SEA_LEVEL);          // 水没列も考慮
-    worldBottomY = floorRef - 1 - WORLD_DEPTH;            // 岩盤は最深地表の更に下
-    maxSurfaceY = Math.max(maxH, SEA_LEVEL);
-
-    bulkBuild = true; // データだけ敷き詰め、最後に一括メッシュ化
-
-    // --- 2) 固体データ（地層）を敷き詰める＋海面まで水で満たす ---
-    for (let x = -offset; x < offset; x++) {
-        for (let z = -offset; z < offset; z++) {
-            const h = heights[getKey2(x, z)];
-            blockData[getKey(x, worldBottomY, z)] = BLOCKS.BEDROCK;
-            for (let y = worldBottomY + 1; y <= h; y++) {
-                blockData[getKey(x, y, z)] = strataBlockAt(x, y, z, h);
-            }
-            if (h < SEA_LEVEL) {  // 海面以下の空気を水で満たす（谷＝湖/海）
-                for (let y = h + 1; y <= SEA_LEVEL; y++) {
-                    blockData[getKey(x, y, z)] = BLOCKS.WATER;
-                }
-            }
-        }
-    }
-
-    // --- 3) 裂け目（ravine）を彫る ---
-    const rng = makeRng((worldSeed ^ 0x9e3779b9) >>> 0);
-    const ravineCount = Math.max(1, Math.round(WORLD_SIZE / 48)); // 32/64→1, 128→3 程度
-    for (let r = 0; r < ravineCount; r++) carveRavine(rng);
-
-    // --- 4) 木と家（地表高に合わせて配置。bulkBuild 中はデータ登録のみ） ---
-    for (let x = -offset + 2; x < offset - 2; x++) {
-        for (let z = -offset + 2; z < offset - 2; z++) {
-            const h = heights[getKey2(x, z)];
-            if (h < SEA_LEVEL + 1) continue;            // 水際/水没には生やさない
-            if (blockData[getKey(x, h, z)] !== BLOCKS.GRASS) continue; // 草の上だけ（裂け目で消えた所も避ける）
-            const nearHouse = (x >= 4 && x <= 10 && z >= 4 && z <= 10);
-            if (!nearHouse && Math.random() < 0.03) createTree(x, h + 1, z);
-        }
-    }
-    placeHouseOnTerrain(5, 5);
-
-    bulkBuild = false;
-    buildAllChunks(); // 露出面だけを各チャンクのメッシュへ一括マージ
-
-    // ワールドサイズが変わった可能性があるので fog を新サイズで再設定
+    flushDirtyChunks(); // 起動チャンクを一括メッシュ化
     applyFog();
 }
 
-// 家を地表に置く（5x5 の土台を平らに均してから建てる）
-function placeHouseOnTerrain(hx, hz) {
-    let baseY = terrainHeightAt(hx + 2, hz + 2);
-    if (baseY < SEA_LEVEL) baseY = SEA_LEVEL;  // 水没地には海面まで土台を上げる
-    for (let i = 0; i < 5; i++) {
-        for (let j = 0; j < 5; j++) {
-            const x = hx + i, z = hz + j;
-            for (let y = baseY + 1; y <= maxSurfaceY + 6; y++) delete blockData[getKey(x, y, z)]; // 上部を撤去
-            for (let y = worldBottomY + 1; y <= baseY; y++) {
-                if (!blockData[getKey(x, y, z)] || blockData[getKey(x, y, z)] === BLOCKS.WATER) {
-                    blockData[getKey(x, y, z)] = (y === baseY ? BLOCKS.GRASS : BLOCKS.DIRT);
-                }
-            }
-        }
-    }
-    createHouse(hx, baseY + 1, hz);
-}
-
-// スライダー値で世界を作り直し、プレイヤーを地上にリセット（新しい地形＝新シード）
 function regenerateWorld() {
-    worldSeed = 0; // 再生成のたびに新しい地形
+    worldSeed = 0;                 // 新シード
     generateWorld();
     spawnPlayer();
     controls.isFlying = false;
@@ -480,62 +731,10 @@ function regenerateWorld() {
     if (fly) fly.style.display = 'none';
 }
 
-function createTree(x, y, z) {
-    for (let i = 0; i < 4; i++) addBlock(x, y + i, z, BLOCKS.WOOD);
-    for (let lx = x - 2; lx <= x + 2; lx++) {
-        for (let lz = z - 2; lz <= z + 2; lz++) {
-            for (let ly = y + 2; ly <= y + 3; ly++) {
-                if (Math.abs(lx - x) === 2 && Math.abs(lz - z) === 2) continue;
-                if (blockData[getKey(lx, ly, lz)]) continue;
-                addBlock(lx, ly, lz, BLOCKS.LEAVES);
-            }
-        }
-    }
-    for (let lx = x - 1; lx <= x + 1; lx++) {
-        for (let lz = z - 1; lz <= z + 1; lz++) {
-            if (blockData[getKey(lx, y + 4, lz)]) continue;
-            addBlock(lx, y + 4, lz, BLOCKS.LEAVES);
-        }
-    }
-    addBlock(x, y + 5, z, BLOCKS.LEAVES);
-}
-
-function createHouse(x, y, z) {
-    // Floor
-    for (let i = 0; i < 5; i++) {
-        for (let j = 0; j < 5; j++) {
-            addBlock(x + i, y, z + j, BLOCKS.WOOD);
-        }
-    }
-    // Walls & Air
-    for (let dy = 1; dy <= 3; dy++) {
-        for (let i = 0; i < 5; i++) {
-            for (let j = 0; j < 5; j++) {
-                if (i === 0 || i === 4 || j === 0 || j === 4) {
-                    if (dy < 3 && i === 2 && j === 0) continue; // Door hole
-                    if (dy === 2 && (i === 0 || i === 4) && j === 2) continue; // Window hole
-                    addBlock(x + i, y + dy, z + j, BLOCKS.WOOD);
-                }
-            }
-        }
-    }
-    // Roof
-    for (let i = 0; i < 5; i++) {
-        for (let j = 0; j < 5; j++) {
-            addBlock(x + i, y + 4, z + j, BLOCKS.LEAVES);
-        }
-    }
-}
-
 // --- ボクセル DDA レイキャスト（採掘/設置/着弾のピッキング。メッシュ非依存） ---
-// origin から dir 方向へ最大 maxDist まで進み、最初の固体セルを返す。
-// hitWater=false なら水(noCollide)はすり抜ける（弾の着弾用）。
-// 戻り値: { x,y,z, type, nx,ny,nz(命中面の外向き法線), dist } または null
+// ★座標規約: ブロックは整数座標を「中心」に [N-0.5,N+0.5] を占める。origin+0.5 してから floor で
+//   セル番号=round(world) となり中心規約に一致（この +0.5 を壊すと全ピッキングが半ブロック狂う）。
 function voxelRaycast(origin, dir, maxDist, hitWater) {
-    // ★重要: ブロックは整数座標を「中心」に [N-0.5, N+0.5] を占める（描画 buildChunk の x-0.5+lx、
-    // 衝突 physics.js の blockBox=[x-0.5,x+0.5] と同じ規約）。素朴な floor(origin) だとセルを
-    // [N,N+1) として歩き、実ジオメトリと 0.5 ずれて採掘/設置/着弾が半ブロック狂う。
-    // 原点を +0.5 してから floor すると セル番号 = round(world) となり中心規約に一致する。
     const ox = origin.x + 0.5, oy = origin.y + 0.5, oz = origin.z + 0.5;
     let x = Math.floor(ox), y = Math.floor(oy), z = Math.floor(oz);
     const stepX = dir.x > 0 ? 1 : (dir.x < 0 ? -1 : 0);
@@ -549,7 +748,6 @@ function voxelRaycast(origin, dir, maxDist, hitWater) {
     let tMaxZ = stepZ > 0 ? (z + 1 - oz) * tDeltaZ : (stepZ < 0 ? (oz - z) * tDeltaZ : Infinity);
 
     let nx = 0, ny = 0, nz = 0, t = 0;
-    // 安全上限（無限ループ防止）
     for (let guard = 0; guard < 512; guard++) {
         if (tMaxX < tMaxY && tMaxX < tMaxZ) {
             x += stepX; t = tMaxX; tMaxX += tDeltaX; nx = -stepX; ny = 0; nz = 0;
@@ -559,7 +757,7 @@ function voxelRaycast(origin, dir, maxDist, hitWater) {
             z += stepZ; t = tMaxZ; tMaxZ += tDeltaZ; nx = 0; ny = 0; nz = -stepZ;
         }
         if (t > maxDist) return null;
-        const tp = blockData[getKey(x, y, z)];
+        const tp = getBlock(x, y, z);
         if (tp) {
             if (!hitWater) {
                 const p = BLOCK_PROPS[tp];

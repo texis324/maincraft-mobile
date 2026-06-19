@@ -24,7 +24,7 @@
         ☢ 原爆⑦ / ☢☢ 水爆⑧ を設置 → ⑨火打石で着火（5秒後に大爆発）<br>
         G: 空爆要請（上空から爆弾の雨）<br>
         🚀 核ミサイル/MIRV: ホイールかホットバーで選び右クリックで発射<br>
-        ポーズ(Esc)でマップの広さ・深さを変更→再生成<br>
+        ポーズ(Esc)で描画距離・深さを変更→再生成（ワールドは無限）<br>
     </div>
 
     <div id="fps-counter">FPS: 60</div>
@@ -68,16 +68,16 @@
             </div>
 
             <hr style="width: 100%; border-color: #555; margin: 8px 0;">
-            <div style="font-weight: bold;">🗺 マップ設定（変更後「再生成」）</div>
+            <div style="font-weight: bold;">🌍 ワールド設定（無限・変更後「再生成」）</div>
             <div style="display: flex; flex-direction: column; gap: 5px;">
-                <label for="map-size">広さ（一辺）: <span id="map-size-value">64</span></label>
-                <input type="range" id="map-size" min="32" max="128" step="16" value="64" style="width: 200px;">
+                <label for="map-size">描画距離（チャンク）: <span id="map-size-value">8</span></label>
+                <input type="range" id="map-size" min="4" max="16" step="1" value="8" style="width: 200px;">
             </div>
             <div style="display: flex; flex-direction: column; gap: 5px;">
-                <label for="map-depth">深さ（地下の層）: <span id="map-depth-value">16</span></label>
-                <input type="range" id="map-depth" min="4" max="48" step="4" value="16" style="width: 200px;">
+                <label for="map-depth">深さ（地下の層）: <span id="map-depth-value">96</span></label>
+                <input type="range" id="map-depth" min="48" max="192" step="16" value="96" style="width: 200px;">
             </div>
-            <button id="btn-regenerate" style="background: #2e7d32; border-color: #1b5e20;">マップを再生成</button>
+            <button id="btn-regenerate" style="background: #2e7d32; border-color: #1b5e20;">ワールドを再生成</button>
         </div>
 
         <button id="btn-resume">ゲームに戻る</button>

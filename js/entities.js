@@ -60,8 +60,6 @@ function igniteTNT(x, y, z, velocity, isMega = false, bombKind = null) {
 }
 
 function updatePrimedTNTs(delta) {
-    const limit = WORLD_SIZE / 2 - 1.0;
-
     for (let i = primedTNTs.length - 1; i >= 0; i--) {
         const tnt = primedTNTs[i];
 
@@ -70,22 +68,7 @@ function updatePrimedTNTs(delta) {
             tnt.velocity.y -= GRAVITY * delta;
         }
 
-        // Wall Reflection
-        if (tnt.mesh.position.x > limit) {
-            tnt.mesh.position.x = limit;
-            tnt.velocity.x *= -0.5;
-        } else if (tnt.mesh.position.x < -limit) {
-            tnt.mesh.position.x = -limit;
-            tnt.velocity.x *= -0.5;
-        }
-
-        if (tnt.mesh.position.z > limit) {
-            tnt.mesh.position.z = limit;
-            tnt.velocity.z *= -0.5;
-        } else if (tnt.mesh.position.z < -limit) {
-            tnt.mesh.position.z = -limit;
-            tnt.velocity.z *= -0.5;
-        }
+        // ★無限ワールド: 旧 ±WORLD_SIZE/2 の壁反射は撤去（爆弾はブロック衝突で止まる）。
 
         // 位置更新
         const currentPos = tnt.mesh.position.clone();
@@ -112,8 +95,8 @@ function updatePrimedTNTs(delta) {
 
         // TNTの底面より下にあるブロックを探す
         const blockBelowY = Math.floor(tntBottomY);
-        const groundKey = getKey(Math.floor(nextPos.x), blockBelowY, Math.floor(nextPos.z));
-        const hasGroundBelow = blockData[groundKey] && !BLOCK_PROPS[blockData[groundKey]]?.noCollide;
+        const gbType = getBlock(Math.floor(nextPos.x), blockBelowY, Math.floor(nextPos.z));
+        const hasGroundBelow = gbType && !BLOCK_PROPS[gbType]?.noCollide;
 
         if (tnt.velocity.y <= 0 && hasGroundBelow) {
             // 地面ブロックの上面Y座標（ブロック中心 + 0.5）
@@ -142,8 +125,8 @@ function updatePrimedTNTs(delta) {
         } else if (tnt.grounded) {
             // 接地中だったが下にブロックがなくなった場合
             const checkY = Math.floor(nextPos.y - 0.5);
-            const checkGroundKey = getKey(Math.floor(nextPos.x), checkY, Math.floor(nextPos.z));
-            if (!blockData[checkGroundKey] || BLOCK_PROPS[blockData[checkGroundKey]]?.noCollide) {
+            const cgType = getBlock(Math.floor(nextPos.x), checkY, Math.floor(nextPos.z));
+            if (!cgType || BLOCK_PROPS[cgType]?.noCollide) {
                 tnt.grounded = false;
             }
         }
@@ -151,8 +134,8 @@ function updatePrimedTNTs(delta) {
         // Y方向の衝突チェック（上）
         const tntTopY = tntCenterY + 0.49;
         const ceilingCheckY = Math.floor(tntTopY);
-        const ceilingKey = getKey(Math.floor(nextPos.x), ceilingCheckY, Math.floor(nextPos.z));
-        const hasCeilingAbove = blockData[ceilingKey] && !BLOCK_PROPS[blockData[ceilingKey]]?.noCollide;
+        const ceilType = getBlock(Math.floor(nextPos.x), ceilingCheckY, Math.floor(nextPos.z));
+        const hasCeilingAbove = ceilType && !BLOCK_PROPS[ceilType]?.noCollide;
 
         if (tnt.velocity.y > 0 && hasCeilingAbove) {
             tnt.velocity.y *= -0.2;
@@ -215,7 +198,8 @@ function fireRocket() {
     rockets.push({
         mesh: rocket,
         velocity: dir.multiplyScalar(20), // 遅めのスピード
-        power: rocketPower // 威力設定
+        power: rocketPower, // 威力設定
+        traveled: 0          // 発射地点からの飛距離（消滅判定・カメラ相対だと自分で追い越せてしまう）
     });
 
     playSound('shoot');
@@ -234,6 +218,7 @@ function updateRockets(delta) {
         // 位置更新
         const movement = rocket.velocity.clone().multiplyScalar(delta);
         rocket.mesh.position.add(movement);
+        rocket.traveled += movement.length();
 
         let hit = false;
 
@@ -244,14 +229,14 @@ function updateRockets(delta) {
 
         // ブロックとの直接衝突チェック
         const pos = rocket.mesh.position;
-        const blockKey = getKey(Math.floor(pos.x), Math.floor(pos.y), Math.floor(pos.z));
-        if (blockData[blockKey] && !BLOCK_PROPS[blockData[blockKey]]?.noCollide) {
+        const btype = getBlock(Math.floor(pos.x), Math.floor(pos.y), Math.floor(pos.z));
+        if (btype && !BLOCK_PROPS[btype]?.noCollide) {
             hit = true;
         }
 
-        // ワールド境界チェック（起伏/裂け目で地形は y<0 まで掘れるので、底は worldBottomY 基準）
-        const limit = WORLD_SIZE / 2;
-        if (Math.abs(pos.x) > limit || Math.abs(pos.z) > limit || pos.y < worldBottomY || pos.y > maxSurfaceY + 60) {
+        // ★無限ワールド: 壁は無い。飛距離(発射地点基準)/底/上限で消滅。カメラ相対だと高速移動で
+        //   自分のロケットを追い越して誤消滅させる/逆に永久に生きるため、traveled で判定する。
+        if (rocket.traveled > VIEW_DIST * 16 + 40 || pos.y < worldBottomY || pos.y > maxSurfaceY + 60) {
             hit = true;
         }
 
@@ -345,9 +330,9 @@ function explode(cx, cy, cz, isMega = false, customRadius = null, bombKind = nul
         for (let y = y0; y <= y1; y++) {
             for (let z = z0; z <= z1; z++) {
                 if (!inBlast(x, y, z)) continue;
-                const key = getKey(x, y, z);
-                const t = blockData[key];
-                if (!t || t === BLOCKS.BEDROCK) continue;
+                const t = getBlock(x, y, z);
+                if (t === BLOCKS.BEDROCK) continue;
+                if (!t) { carveUnloaded(x, y, z); continue; } // 未生成チャンク内は撤去editだけ記録（後で復元）
 
                 // 爆薬系は誘爆（連鎖）
                 if (t === BLOCKS.TNT || t === BLOCKS.MEGA_TNT || t === BLOCKS.NUKE || t === BLOCKS.HBOMB) {
@@ -692,14 +677,15 @@ function disposeNukeMissileMesh(group) {
 // ミサイル直下の地表（最上段の固体ブロック）のYを返す（airburst高度の基準）
 function nukeGroundYBelow(x, z, fromY) {
     for (let y = Math.floor(fromY); y > worldBottomY; y--) {
-        const t = blockData[getKey(x, y, z)];
+        const t = getBlock(x, y, z);
         if (t && !(BLOCK_PROPS[t] && BLOCK_PROPS[t].noCollide)) return y;
     }
-    return worldBottomY;
+    // 未生成域（無限ワールドの遠方）で固体が見つからない時は決定的な地表高で代用＝
+    // 空中炸裂が遠方でも正しい高度で起き、クレーターが正しく記録される（getBlock=0=底なし対策）
+    return Math.max(Math.min(terrainHeightAt(x, z), Math.floor(fromY)), worldBottomY);
 }
 
 function updateNukeMissiles(delta) {
-    const limit = WORLD_SIZE / 2;
     for (let i = nukeMissiles.length - 1; i >= 0; i--) {
         const m = nukeMissiles[i];
         m.age += delta;
@@ -737,9 +723,9 @@ function updateNukeMissiles(delta) {
         const rayDir = m.velocity.clone().normalize();
         const prevPos = pos.clone().sub(movement);
         if (voxelRaycast(prevPos, rayDir, movement.length() + 0.3, false)) hit = true;
-        const blockKey = getKey(Math.floor(pos.x), Math.floor(pos.y), Math.floor(pos.z));
-        if (blockData[blockKey] && !BLOCK_PROPS[blockData[blockKey]]?.noCollide) hit = true;
-        if (Math.abs(pos.x) > limit || Math.abs(pos.z) > limit || pos.y < worldBottomY || pos.y > maxSurfaceY + 90) hit = true;
+        const mbType = getBlock(Math.floor(pos.x), Math.floor(pos.y), Math.floor(pos.z));
+        if (mbType && !BLOCK_PROPS[mbType]?.noCollide) hit = true;
+        if (pos.y < worldBottomY || pos.y > maxSurfaceY + 90) hit = true;
         if (m.traveled > NUKE_MISSILE_MAX_RANGE) hit = true;
 
         // 単弾頭ミサイルは空中爆発(airburst): 降下中に「地表+H」で炸裂＝横に広く薙ぎ払う（被害最大化・MIRVは対象外）

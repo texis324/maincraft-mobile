@@ -4,8 +4,11 @@ scene.background = new THREE.Color(0x87CEEB);
 // fog をマップサイズ連動で設定（PC専用方針なので大きなキノコ雲も眺められるよう遠くへ）
 // near は近景の空気感を残しつつ、far はマップ全体＋高く広い爆発煙を飲み込まないところまで伸ばす
 function applyFog() {
-    const near = Math.max(40, WORLD_SIZE * 0.9);
-    const far  = Math.max(160, WORLD_SIZE * 2.6);
+    // 無限ワールド: 霧は描画距離(VIEW_DIST チャンク)の境界で地形を溶かし、ストリーミングの
+    // ポップインを隠す。far はロード半径の内側に置く（far > ロード半径だと未生成の縁が見える）。
+    const span = VIEW_DIST * 16;            // 描画距離（ブロック）
+    const near = Math.max(48, span * 0.45);
+    const far  = Math.max(150, span * 0.92);
     if (scene.fog) {
         scene.fog.near = near;
         scene.fog.far  = far;
