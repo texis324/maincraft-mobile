@@ -6,6 +6,9 @@ function getImageForType(type) {
     else if(type === BLOCKS.MEGA_TNT) return materials[type][0].map.image.toDataURL();
     else if(type === BLOCKS.NUKE) return materials[type][0].map.image.toDataURL();
     else if(type === BLOCKS.HBOMB) return materials[type][0].map.image.toDataURL();
+    else if(type === BLOCKS.TSAR) return materials[type][0].map.image.toDataURL();
+    else if(type === BLOCKS.MISSILE_BUTTON) return missileButtonTexture.image.toDataURL();
+    else if(type === BLOCKS.PENETRATOR) return penetratorTexture.image.toDataURL();
     else if(type === BLOCKS.WATER) return materials[type].map.image.toDataURL();
     else if(type === BLOCKS.FLINT) return flintTexture.image.toDataURL();
     else if(type === BLOCKS.TNT_LAUNCHER) return launcherTexture.image.toDataURL();

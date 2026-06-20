@@ -121,6 +121,18 @@ function attemptPlaceOrIgnite(screenX, screenY) {
         return;
     }
 
+    // ミサイル発射ボタン: 核ミサイル5発を横一列に斉射（着弾点がきのこ雲群で一望できる中距離）
+    if (currentItem === BLOCKS.MISSILE_BUTTON) {
+        launchNukeBarrage();
+        return;
+    }
+
+    // 地中貫通核: 発射→着弾後に地中へ潜って起爆（地下空洞＋陥没）
+    if (currentItem === BLOCKS.PENETRATOR) {
+        launchPenetrator();
+        return;
+    }
+
     const hit = pickBlock(screenX, screenY);
 
     if (hit) {
@@ -147,6 +159,12 @@ function attemptPlaceOrIgnite(screenX, screenY) {
         // 水素爆弾の点火
         if (currentItem === BLOCKS.FLINT && type === BLOCKS.HBOMB) {
             igniteTNT(hit.x, hit.y, hit.z, null, false, 'hbomb');
+            return;
+        }
+
+        // ツァーリ・ボンバの点火（史上最大＝閃光→暗転）
+        if (currentItem === BLOCKS.FLINT && type === BLOCKS.TSAR) {
+            igniteTNT(hit.x, hit.y, hit.z, null, false, 'tsar');
             return;
         }
 

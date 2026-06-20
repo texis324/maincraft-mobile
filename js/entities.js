@@ -23,6 +23,7 @@ function createPrimedTNT(x, y, z, velocity, isMega = false, bombKind = null, imp
     let matType = BLOCKS.TNT;
     if (bombKind === 'nuke') matType = BLOCKS.NUKE;
     else if (bombKind === 'hbomb') matType = BLOCKS.HBOMB;
+    else if (bombKind === 'tsar') matType = BLOCKS.TSAR;
     else if (isMega) matType = BLOCKS.MEGA_TNT;
     let mat = materials[matType];
     if(Array.isArray(mat)) mat = mat.map(m => m.clone());
@@ -323,13 +324,18 @@ function buildCraterRim(cx, cy, cz, R, affected) {
 
 // bombKind: null | 'nuke' | 'hbomb'
 function explode(cx, cy, cz, isMega = false, customRadius = null, bombKind = null) {
-    const isBomb = (bombKind === 'nuke' || bombKind === 'hbomb');
+    // 核系(放射性・閃光/キノコ雲/画面揺れの演出付き)＝原爆/水爆/ツァーリ/地中貫通核
+    const isBomb = (bombKind === 'nuke' || bombKind === 'hbomb' || bombKind === 'tsar' || bombKind === 'penetrator');
 
-    // 原爆/水爆は専用の演出（ホワイトフラッシュ・キノコ雲・画面揺れ・重低音）
+    // 原爆/水爆/ツァーリは専用の演出（ホワイトフラッシュ・キノコ雲・画面揺れ・重低音）
     if (isBomb) {
         playSound('nuke');
         triggerNukeFlash();
-        if (bombKind === 'hbomb') {
+        if (bombKind === 'tsar') {
+            setTimeout(triggerNukeFlash, 120); setTimeout(triggerNukeFlash, 260); // 三段の超閃光
+            nukeScreenShake(2.2, 0.13);
+            triggerTsarDarkness();           // 閃光のあと世界が暗転（塵で太陽が陰る）
+        } else if (bombKind === 'hbomb') {
             setTimeout(triggerNukeFlash, 130); // 二段フラッシュ
             nukeScreenShake(1.3, 0.09);
         } else {
@@ -339,16 +345,17 @@ function explode(cx, cy, cz, isMega = false, customRadius = null, bombKind = nul
         playSound('explode');
     }
 
-    // 半径: 明示指定(customRadius・ミサイルairburst等)が最優先 > 水爆 > 原爆 > MEGA(8) > 通常(4)
+    // 半径: 明示指定(customRadius・ミサイルairburst/貫通核等)が最優先 > ツァーリ > 水爆 > 原爆 > MEGA(8) > 通常(4)
     let radius;
     if (customRadius !== null) radius = customRadius;
+    else if (bombKind === 'tsar') radius = tsarPower;
     else if (bombKind === 'hbomb') radius = hbombPower;
     else if (bombKind === 'nuke') radius = nukePower;
     else radius = isMega ? 8 : 4;
 
-    const particleCount = isBomb ? (bombKind === 'hbomb' ? 220 : 140) : (isMega ? 60 : 30);
-    const particleSize = isBomb ? 0.9 : (isMega ? 0.6 : 0.4);
-    const particleType = bombKind === 'hbomb' ? BLOCKS.HBOMB : (bombKind === 'nuke' ? BLOCKS.NUKE : (isMega ? BLOCKS.MEGA_TNT : BLOCKS.TNT));
+    const particleCount = isBomb ? (bombKind === 'tsar' ? 320 : (bombKind === 'hbomb' ? 220 : 140)) : (isMega ? 60 : 30);
+    const particleSize = isBomb ? (bombKind === 'tsar' ? 1.1 : 0.9) : (isMega ? 0.6 : 0.4);
+    const particleType = bombKind === 'tsar' ? BLOCKS.TSAR : (bombKind === 'hbomb' ? BLOCKS.HBOMB : ((bombKind === 'nuke' || bombKind === 'penetrator') ? BLOCKS.NUKE : (isMega ? BLOCKS.MEGA_TNT : BLOCKS.TNT)));
     createBlockParticles(cx, cy, cz, particleType, particleCount, particleSize);
     if (isBomb) createMushroomCloud(cx, cy, cz, radius);
 
@@ -358,7 +365,8 @@ function explode(cx, cy, cz, isMega = false, customRadius = null, bombKind = nul
     // 掘る深さは爆心から最大30まで（岩盤は残す）。深いマップで底まで掘って激重になるのを防ぐ
     const bottomY = Math.max(worldBottomY + 1, Math.floor(cy) - Math.min(radius, 30));
     const R = radius, R2 = R * R;
-    const depthScale = isBomb ? 0.4 : 1.0;   // 下方向の有効半径の比率（<1＝浅く広く・お椀型）
+    // 下方向の有効半径の比率（<1＝浅く広く・お椀型）。地中貫通核は地下で全球状の空洞を作るので 1.0
+    const depthScale = (bombKind === 'penetrator') ? 1.0 : (isBomb ? 0.4 : 1.0);
     const Rv2 = (R * depthScale) ** 2;
     const chainForce = bombKind ? 40 : (isMega ? 30 : 20);
     const x0 = Math.floor(cx - R), x1 = Math.ceil(cx + R);
@@ -432,8 +440,9 @@ function explode(cx, cy, cz, isMega = false, customRadius = null, bombKind = nul
     }
     _invalidateGetCache(); // data を直書きしたので getBlock のチャンクキャッシュを無効化
 
-    // 原爆/水爆はクレーターを「イベント1件」で永続化（チャンク再生成時に再カーブ＝掘削edit数万が不要）。
-    if (isBomb) recordExplosionEvent(cx, cy, cz, R, true);
+    // 原爆/水爆/ツァーリ/貫通核はクレーターを「イベント1件」で永続化（チャンク再生成時に再カーブ＝掘削edit数万が不要）。
+    // depthScale も記録＝再生成側が同じお椀/全球の形を再現できる（貫通核=1.0全球とnuke/hbomb=0.4お椀の混在に対応）。
+    if (isBomb) recordExplosionEvent(cx, cy, cz, R, true, depthScale);
 
     // 爆風なぎ倒し: クレーター縁[R]〜2Rの環状帯で、地表より上の構造物(村/木/城)を撤去（live・原爆/水爆のみ）。
     // ★リップ(buildCraterRim)より先に走らせる: FLATTEN_R0=1.0 でリングがリップ領域[0.95R,1.35R]と重なるため、
@@ -610,6 +619,37 @@ function nukeScreenShake(duration = 0.9, intensity = 0.06) {
     step();
 }
 
+// ツァーリ・ボンバの暗転演出: 超閃光のあと、塵で太陽が陰り世界が一時的に夜のように暗くなる→ゆっくり回復。
+// scene.js の ambientLight/dirLight/背景/霧色を一時的に落とす（CanvasModulate相当をThree.jsで）。トークンで
+// 多重発火時は最新だけが効く（古いループは即終了＝明度のちらつき防止）。
+let _tsarDarkToken = 0;
+const _tsarSkyDay = new THREE.Color(0x87CEEB);
+const _tsarSkyDark = new THREE.Color(0x0a0a14);
+function triggerTsarDarkness() {
+    const myToken = ++_tsarDarkToken;
+    const ambStart = 0.6, dirStart = 0.7;     // scene.js の初期 intensity
+    const DUR = 12000, DIP = 0.12;            // 12秒で回復・最暗で12%
+    const start = performance.now();
+    function step() {
+        if (myToken !== _tsarDarkToken) return;            // 新しい暗転が始まった＝この古いループは終了
+        const t = (performance.now() - start) / DUR;
+        if (t >= 1) {                                      // 復帰
+            ambientLight.intensity = ambStart; dirLight.intensity = dirStart;
+            scene.background.copy(_tsarSkyDay);
+            if (scene.fog) scene.fog.color.copy(_tsarSkyDay);
+            return;
+        }
+        // t<0.15で急に暗転→以降ゆっくり回復
+        const dark = t < 0.15 ? (1 - (t / 0.15) * (1 - DIP)) : DIP + (1 - DIP) * ((t - 0.15) / 0.85);
+        ambientLight.intensity = ambStart * dark;
+        dirLight.intensity = dirStart * dark;
+        scene.background.copy(_tsarSkyDay).lerp(_tsarSkyDark, 1 - dark);
+        if (scene.fog) scene.fog.color.copy(_tsarSkyDay).lerp(_tsarSkyDark, 1 - dark);
+        requestAnimationFrame(step);
+    }
+    step();
+}
+
 // キノコ雲（火球 + 立ち上る茎 + 上部で広がる傘）。ボクセル風の煙キューブ。
 const smokeParticles = [];
 function spawnSmoke(x, y, z, color, size, vel, life, grow, buoy) {
@@ -743,7 +783,7 @@ function buildNukeMissileMesh(scale, isMirv) {
 }
 
 // ミサイルを1基生成して nukeMissiles に登録
-function spawnNukeMissile(position, direction, scale, isMirv, canSplit) {
+function spawnNukeMissile(position, direction, scale, isMirv, canSplit, penetrator) {
     const mesh = buildNukeMissileMesh(scale, isMirv);
     mesh.position.copy(position);
     // 機首(+Y)を進行方向へ向ける
@@ -756,8 +796,46 @@ function spawnNukeMissile(position, direction, scale, isMirv, canSplit) {
         age: 0,
         isMirv: isMirv,
         canSplit: canSplit,   // true=分裂前の母体 / false=単弾頭・分裂後の子弾頭
+        penetrator: !!penetrator, // true=地中貫通核（空中爆発せず地面に当たって地中で起爆）
         flameTime: 0
     });
+}
+
+// ミサイル発射ボタン: 核ミサイル5発を横一列に斉射（中距離の地表へ＝きのこ雲群が一望できる）。金正恩風。
+function launchNukeBarrage() {
+    const fwd = new THREE.Vector3();
+    camera.getWorldDirection(fwd);
+    fwd.y = 0;
+    if (fwd.lengthSq() < 1e-4) fwd.set(0, 0, -1);
+    fwd.normalize();
+    const right = new THREE.Vector3(-fwd.z, 0, fwd.x); // 進行方向の真横
+    const base = camera.position.clone();
+    const midDist = 90;                                 // 着弾までの距離（中距離）
+    const offsets = [-48, -24, 0, 24, 48];              // 横一列の間隔
+    for (let i = 0; i < offsets.length; i++) {
+        const tx = base.x + fwd.x * midDist + right.x * offsets[i];
+        const tz = base.z + fwd.z * midDist + right.z * offsets[i];
+        const ty = nukeGroundYBelow(Math.floor(tx), Math.floor(tz), maxSurfaceY + 5); // 着弾点の地表
+        const spawnPos = base.clone()
+            .add(fwd.clone().multiplyScalar(3.2))
+            .add(right.clone().multiplyScalar(offsets[i] * 0.12)); // 発射口を少し横へ散らす
+        const dir = new THREE.Vector3(tx - spawnPos.x, ty - spawnPos.y, tz - spawnPos.z).normalize();
+        spawnNukeMissile(spawnPos, dir, 2.0, false, false, false); // 単弾頭・降下中にairburst
+    }
+    playSound('missile_launch');
+    triggerGunRecoil();
+}
+
+// 地中貫通核を発射（やや下向き＝地面に突き刺す。着弾後 updateNukeMissiles が地中で起爆させる）
+function launchPenetrator() {
+    const dir = new THREE.Vector3();
+    camera.getWorldDirection(dir);
+    dir.y -= 0.15;
+    dir.normalize();
+    const spawnPos = camera.position.clone().add(dir.clone().multiplyScalar(3.0));
+    spawnNukeMissile(spawnPos, dir, 1.8, false, false, true); // penetrator=true
+    playSound('missile_launch');
+    triggerGunRecoil();
 }
 
 // プレイヤー視点から発射（actions.js から呼ぶ）
@@ -855,9 +933,9 @@ function updateNukeMissiles(delta) {
         if (pos.y < worldBottomY || pos.y > maxSurfaceY + 90) hit = true;
         if (m.traveled > NUKE_MISSILE_MAX_RANGE) hit = true;
 
-        // 単弾頭ミサイルは空中爆発(airburst): 降下中に「地表+H」で炸裂＝横に広く薙ぎ払う（被害最大化・MIRVは対象外）
+        // 単弾頭ミサイルは空中爆発(airburst): 降下中に「地表+H」で炸裂＝横に広く薙ぎ払う（被害最大化・MIRV/貫通核は対象外）
         let airburstRadius = null;
-        if (!m.isMirv && m.velocity.y < 0 && m.traveled > 10) {
+        if (!m.isMirv && !m.penetrator && m.velocity.y < 0 && m.traveled > 10) {
             const gy = nukeGroundYBelow(Math.floor(pos.x), Math.floor(pos.z), pos.y);
             if (pos.y <= gy + NUKE_MISSILE_AIRBURST_H) airburstRadius = Math.round(nukePower * 1.25);
         }
@@ -873,8 +951,14 @@ function updateNukeMissiles(delta) {
 
         if (airburstRadius !== null || hit) {
             // 即時explodeせずキューへ（MIRV5発が同フレームに重なるフリーズを回避・1フレーム1発で処理）
-            // airburst時はその大きめ半径を渡す（地表炸裂より横に広く薙ぎ払う）
-            nukeBlastQueue.push({ x: pos.x, y: pos.y, z: pos.z, radius: airburstRadius });
+            if (m.penetrator) {
+                // 地中貫通核: 着弾点の地表から penetratorDepth 潜った点で起爆＝地下に球状空洞＋地表に陥没
+                const gy = nukeGroundYBelow(Math.floor(pos.x), Math.floor(pos.z), pos.y + 4);
+                nukeBlastQueue.push({ x: pos.x, y: gy - penetratorDepth, z: pos.z, radius: nukePower, kind: 'penetrator' });
+            } else {
+                // airburst時はその大きめ半径を渡す（地表炸裂より横に広く薙ぎ払う）
+                nukeBlastQueue.push({ x: pos.x, y: pos.y, z: pos.z, radius: airburstRadius, kind: 'nuke' });
+            }
             scene.remove(m.mesh);
             disposeNukeMissileMesh(m.mesh);
             nukeMissiles.splice(i, 1);
@@ -884,6 +968,6 @@ function updateNukeMissiles(delta) {
     // 1フレームにつき最大1発のnuke爆発を処理（MIRV同時多発のフレームスパイクを時間分散）
     if (nukeBlastQueue.length > 0) {
         const b = nukeBlastQueue.shift();
-        explode(b.x, b.y, b.z, false, b.radius, 'nuke'); // b.radius=null(接触)→nukePower / 数値(airburst)→その半径
+        explode(b.x, b.y, b.z, false, b.radius, b.kind || 'nuke'); // radius=null(接触)→nukePower / 数値→その半径
     }
 }

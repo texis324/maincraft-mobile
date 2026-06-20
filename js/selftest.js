@@ -206,6 +206,35 @@
                 }
             });
 
+            // 11d) 地中貫通核: 地下で全球状の空洞ができ、live↔再生成が一致（depthScale=1.0 のイベント再現）
+            run(results, 'penetrator cavity live==reload (ds=1.0)', () => {
+                const evLen = explosionEvents.length;
+                try {
+                    const X = T + 360, Z = T + 240;
+                    const surf = Math.max(terrainHeightAt(X, Z), SEA_LEVEL);
+                    const cy = surf - 12;
+                    genArea(X, Z, 3);
+                    explode(X, cy, Z, false, 24, 'penetrator');
+                    flushDirtyChunks();
+                    const RX = 32, Y0 = cy - 26, Y1 = surf + 18, ny = Y1 - Y0 + 1, nxz = RX * 2 + 1;
+                    const snap = () => {
+                        const a = new Uint8Array(nxz * nxz * ny); let i = 0;
+                        for (let x = X - RX; x <= X + RX; x++) for (let z = Z - RX; z <= Z + RX; z++) for (let y = Y0; y <= Y1; y++) a[i++] = getBlock(x, y, z);
+                        return a;
+                    };
+                    const live = snap();
+                    const cavity = getBlock(X, cy, Z) === 0;                    // 地中の爆心が空洞
+                    const surfaceBlock = getBlock(X, surf + 16, Z) === 0;        // 地表上18=空（地中起爆なので空に大穴は無いはず）
+                    const cx0 = Math.floor((X - RX) / 16), cx1 = Math.floor((X + RX) / 16), cz0 = Math.floor((Z - RX) / 16), cz1 = Math.floor((Z + RX) / 16), cy0 = Math.floor(Y0 / 16), cy1 = Math.floor(Y1 / 16);
+                    for (let cx = cx0; cx <= cx1; cx++) for (let cyy = cy0; cyy <= cy1; cyy++) for (let cz = cz0; cz <= cz1; cz++) unloadChunk(chunkKey(cx, cyy, cz));
+                    for (let cx = cx0; cx <= cx1; cx++) for (let cyy = cy0; cyy <= cy1; cyy++) for (let cz = cz0; cz <= cz1; cz++) ensureChunk(cx, cyy, cz);
+                    flushDirtyChunks();
+                    const reload = snap();
+                    let diff = 0; for (let k = 0; k < live.length; k++) if (live[k] !== reload[k]) diff++;
+                    return { ok: cavity && diff === 0, detail: { cavity: cavity, diff: diff, cells: live.length } };
+                } finally { explosionEvents.length = evLen; }
+            });
+
             // 12) スポーンが固体地面の上（水中/空中でない）
             run(results, 'spawn on solid ground', () => {
                 spawnPlayer();

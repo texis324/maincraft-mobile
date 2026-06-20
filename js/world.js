@@ -27,8 +27,10 @@ function recordEdit(x, y, z, type) {
 // {cx,cy,cz,R,isBomb} として記録し、チャンク生成時に explode と同じ式で再カーブして復元する。
 // 形状(お椀/真球・深さ上限)は決定的なので完全再現される。
 const explosionEvents = [];
-function recordExplosionEvent(cx, cy, cz, R, isBomb) {
-    explosionEvents.push({ cx: cx, cy: cy, cz: cz, R: R, isBomb: isBomb });
+// ds=下方向の有効半径比(depthScale)。nuke/hbomb=0.4(お椀)・地中貫通核=1.0(全球の地下空洞)。
+// 形を決定的に再現するため記録する（未指定/旧保存データは 0.4 にフォールバック＝従来のお椀）。
+function recordExplosionEvent(cx, cy, cz, R, isBomb, ds) {
+    explosionEvents.push({ cx: cx, cy: cy, cz: cz, R: R, isBomb: isBomb, ds: (ds === undefined ? 0.4 : ds) });
 }
 // 1チャンクに、重なる全爆発イベントを再カーブで適用（generateChunk から block-edit より前に呼ぶ）。
 // explode の掘削と同じ「下半分=お椀/それ以外=真球」「岩盤は残す」を局所インデックスで再現。
@@ -54,8 +56,9 @@ function applyExplosionEventsToChunk(ch) {
         const fr1 = R * FLATTEN_R1;                    // 影響最大半径（なぎ倒し含む）
         if (ev.cx + fr1 < bx0 || ev.cx - fr1 > bx1 || ev.cz + fr1 < bz0 || ev.cz - fr1 > bz1) continue;
 
-        // --- クレーター（お椀状に掘る・このchunkのY範囲に掛かる時だけ） ---
-        const Rv2 = (R * (ev.isBomb ? 0.4 : 1.0)) ** 2;
+        // --- クレーター（お椀/全球状に掘る・このchunkのY範囲に掛かる時だけ） ---
+        // ev.ds=depthScale（0.4=お椀/1.0=全球の地中空洞）。ds=1.0なら下のbowl式は球と一致する。
+        const Rv2 = (R * (ev.ds || 0.4)) ** 2;
         const bottomY = Math.max(worldBottomY + 1, Math.floor(ev.cy) - Math.min(R, 30));
         if (!(ev.cy + R < by0 || bottomY > by1)) {
             const lx0 = Math.max(0, Math.ceil(ev.cx - R) - bx0), lx1 = Math.min(CS - 1, Math.floor(ev.cx + R) - bx0);

@@ -175,6 +175,33 @@ function paintTile(ctx, type) {
         ctx.beginPath(); ctx.moveTo(-6, 10); ctx.lineTo(-14, 18); ctx.lineTo(-6, 16); ctx.closePath(); ctx.fill();
         ctx.beginPath(); ctx.moveTo(6, 10); ctx.lineTo(14, 18); ctx.lineTo(6, 16); ctx.closePath(); ctx.fill();
         ctx.restore();
+    } else if (type === 'tsar_side') {
+        // ツァーリ・ボンバ（橙地＋黒ハザード斜線＋赤い星＝史上最大の威圧感）
+        ctx.fillStyle = '#FF6F00'; ctx.fillRect(0,0,64,64);
+        ctx.fillStyle = '#111';
+        for (let x = -64; x < 64; x += 16) { ctx.beginPath(); ctx.moveTo(x,64); ctx.lineTo(x+24,64); ctx.lineTo(x+48,0); ctx.lineTo(x+24,0); ctx.closePath(); ctx.fill(); } // 黒い斜線
+        ctx.fillStyle = '#D50000'; // 中央の赤い星
+        const tcx=32,tcy=32; ctx.beginPath();
+        for(let k=0;k<10;k++){ const a=-Math.PI/2+k*Math.PI/5; const rr=(k%2===0)?16:7; const px=tcx+Math.cos(a)*rr, py=tcy+Math.sin(a)*rr; k?ctx.lineTo(px,py):ctx.moveTo(px,py);} ctx.closePath(); ctx.fill();
+    } else if (type === 'tsar_top') {
+        ctx.fillStyle = '#FF6F00'; ctx.fillRect(0,0,64,64);
+        ctx.fillStyle = '#111'; ctx.fillRect(20,20,24,24);
+        ctx.fillStyle = '#D50000'; ctx.fillRect(27,27,10,10);
+    } else if (type === 'missile_button') {
+        // 発射ボタン（金属パネル＋赤い大ボタン＋黄黒の縁＝発射コンソール感）
+        ctx.fillStyle = '#37474F'; ctx.fillRect(0,0,64,64);
+        ctx.fillStyle = '#FFD600'; for(let x=0;x<64;x+=12){ ctx.fillRect(x,2,6,4); ctx.fillRect(x+6,58,6,4); } // 黄黒の警告縁
+        ctx.fillStyle = '#B71C1C'; ctx.beginPath(); ctx.arc(32,34,16,0,Math.PI*2); ctx.fill(); // 赤ボタン外
+        ctx.fillStyle = '#FF5252'; ctx.beginPath(); ctx.arc(28,30,8,0,Math.PI*2); ctx.fill();  // ハイライト
+        ctx.fillStyle = '#FFEB3B'; ctx.font='bold 9px Arial'; ctx.fillText('FIRE',20,52);
+    } else if (type === 'penetrator') {
+        // 地中貫通核（暗い金属の弾体＋下向き矢印＝バンカーバスター感）
+        ctx.fillStyle = '#263238'; ctx.fillRect(0,0,64,64);
+        ctx.fillStyle = '#546E7A'; ctx.fillRect(24,6,16,40);          // 弾体
+        ctx.fillStyle = '#90A4AE'; ctx.beginPath(); ctx.moveTo(24,46); ctx.lineTo(40,46); ctx.lineTo(32,60); ctx.closePath(); ctx.fill(); // 尖った貫通ノーズ（下）
+        ctx.fillStyle = '#FFC107'; ctx.fillRect(24,16,16,4);          // 黄帯
+        ctx.fillStyle = '#FF3D00';                                    // 下向き矢印（貫通の意）
+        ctx.beginPath(); ctx.moveTo(10,28); ctx.lineTo(18,28); ctx.lineTo(18,40); ctx.lineTo(22,40); ctx.lineTo(14,52); ctx.lineTo(6,40); ctx.lineTo(10,40); ctx.closePath(); ctx.fill();
     }
 }
 
@@ -204,6 +231,8 @@ let launcherTexture;
 let rocketLauncherTexture;
 let nukeMissileTexture;
 let mirvMissileTexture;
+let missileButtonTexture;
+let penetratorTexture;
 
 function initMaterials() {
     const grassTop = createTexture('grass_top');
@@ -228,6 +257,10 @@ function initMaterials() {
     const nukeTop = createTexture('nuke_top');
     const hbombSide = createTexture('hbomb_side');
     const hbombTop = createTexture('hbomb_top');
+    const tsarSide = createTexture('tsar_side');
+    const tsarTop = createTexture('tsar_top');
+    missileButtonTexture = createTexture('missile_button');
+    penetratorTexture = createTexture('penetrator');
 
     materials[BLOCKS.GRASS] = [
         new THREE.MeshLambertMaterial({ map: grassSide }),
@@ -295,6 +328,14 @@ function initMaterials() {
         new THREE.MeshLambertMaterial({ map: mirvMissileTexture }),
         new THREE.MeshLambertMaterial({ map: mirvMissileTexture })
     ];
+    materials[BLOCKS.TSAR] = [
+        new THREE.MeshLambertMaterial({ map: tsarSide }),
+        new THREE.MeshLambertMaterial({ map: tsarSide }),
+        new THREE.MeshLambertMaterial({ map: tsarTop }),
+        new THREE.MeshLambertMaterial({ map: tsarTop }),
+        new THREE.MeshLambertMaterial({ map: tsarSide }),
+        new THREE.MeshLambertMaterial({ map: tsarSide })
+    ];
     materials[BLOCKS.WATER] = new THREE.MeshLambertMaterial({ map: water, transparent: true, opacity: 0.6, side: THREE.DoubleSide });
     materials[BLOCKS.BEDROCK] = new THREE.MeshLambertMaterial({ map: bedrock });
 
@@ -319,8 +360,9 @@ const ATLAS_TILES = [
     'grass_top', 'grass_side', 'dirt', 'stone', 'wood_side', 'wood_top', 'leaves',
     'tnt_side', 'tnt_top', 'mega_tnt_side', 'mega_tnt_top', 'nuke_side', 'nuke_top',
     'hbomb_side', 'hbomb_top', 'water', 'bedrock',
-    // 地層タイル（23枠・アトラスは8x4=32枠なので収まる）
-    'sand', 'sandstone', 'granite', 'diorite', 'andesite', 'deepslate'
+    // 地層タイル（アトラスは8x4=32枠なので収まる）
+    'sand', 'sandstone', 'granite', 'diorite', 'andesite', 'deepslate',
+    'tsar_side', 'tsar_top'   // ツァーリ・ボンバ（設置ブロックの描画用・25枠）
 ];
 const ATLAS_INDEX = {};
 ATLAS_TILES.forEach((n, i) => { ATLAS_INDEX[n] = i; });
@@ -380,6 +422,7 @@ function initAtlas() {
     BLOCK_TILE_IDX[BLOCKS.MEGA_TNT] = { top: T('mega_tnt_top'), side: T('mega_tnt_side'), bottom: T('mega_tnt_top') };
     BLOCK_TILE_IDX[BLOCKS.NUKE]     = { top: T('nuke_top'),     side: T('nuke_side'),     bottom: T('nuke_top') };
     BLOCK_TILE_IDX[BLOCKS.HBOMB]    = { top: T('hbomb_top'),    side: T('hbomb_side'),    bottom: T('hbomb_top') };
+    BLOCK_TILE_IDX[BLOCKS.TSAR]     = { top: T('tsar_top'),     side: T('tsar_side'),     bottom: T('tsar_top') };
     BLOCK_TILE_IDX[BLOCKS.WATER]    = { top: T('water'),        side: T('water'),         bottom: T('water') };
     BLOCK_TILE_IDX[BLOCKS.BEDROCK]  = { top: T('bedrock'),      side: T('bedrock'),       bottom: T('bedrock') };
     // 地層ブロック（一様タイル＝上下側面同じ）
