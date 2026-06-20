@@ -235,6 +235,38 @@
                 } finally { explosionEvents.length = evLen; }
             });
 
+            // 11d2) 深い穴の壁: LOAD_DEPTH より深いクレーターで、縁のチャンク列(中心は円外だが隅は穴の中＝
+            //        壁ブロックを含む)も穴底まで深くロードされる。旧版は「列の中心点が R 内か」で判定したため
+            //        縁列が浅いまま＝壁が未メッシュで青空が透けた。columnLoadRange の AABB 判定の回帰検出。
+            run(results, 'deep hole edge walls load (no blue wall)', () => {
+                const X = T + 9000, Z = T + 9000;
+                const surf = Math.max(terrainHeightAt(X, Z), SEA_LEVEL);
+                const R = 40, cy = surf - 50;
+                const evBot = Math.max(worldBottomY + 1, Math.floor(cy) - Math.min(R, 30)); // LOAD_DEPTH(72)より深い
+                const wantBotCy = Math.floor(evBot / 16);
+                const saved = _nearEvents.slice();
+                try {
+                    _nearEvents.length = 0;
+                    _nearEvents.push({ cx: X, cy: cy, cz: Z, R: R });
+                    const span = R + 20;
+                    let overlapping = 0, deepOk = 0, edge = 0, edgeDeep = 0;
+                    for (let ccx = Math.floor((X - span) / 16); ccx <= Math.floor((X + span) / 16); ccx++)
+                        for (let ccz = Math.floor((Z - span) / 16); ccz <= Math.floor((Z + span) / 16); ccz++) {
+                            const x0 = ccx * 16, x1 = x0 + 15, z0 = ccz * 16, z1 = z0 + 15;
+                            const nx = X < x0 ? x0 : (X > x1 ? x1 : X), nz = Z < z0 ? z0 : (Z > z1 ? z1 : Z);
+                            if ((nx - X) ** 2 + (nz - Z) ** 2 > R * R) continue; // 穴に重ならない列は対象外
+                            overlapping++;
+                            const isEdge = (ccx * 16 + 8 - X) ** 2 + (ccz * 16 + 8 - Z) ** 2 > R * R; // 旧版が取りこぼす縁列
+                            const deep = columnLoadRange(ccx, ccz)[0] <= wantBotCy;
+                            if (deep) deepOk++;
+                            if (isEdge) { edge++; if (deep) edgeDeep++; }
+                        }
+                    // 全重なり列が穴底まで深くロード＆「中心が円外の縁列」が存在しその全部も深くロード（旧版なら edgeDeep=0）
+                    return { ok: overlapping > 0 && deepOk === overlapping && edge > 0 && edgeDeep === edge,
+                             detail: { overlapping: overlapping, deepOk: deepOk, edge: edge, edgeDeep: edgeDeep } };
+                } finally { _nearEvents.length = 0; for (const e of saved) _nearEvents.push(e); }
+            });
+
             // 11e) AI破壊軍団: 召喚→updateAgentsを手動stepして例外なく動く＋InstancedMesh countが一致
             run(results, 'AI legion summon+update', () => {
                 const camSave = camera.position.clone();

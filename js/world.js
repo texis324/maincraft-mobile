@@ -888,11 +888,18 @@ function columnLoadRange(ccx, ccz) {
     const surf = terrainHeightAt(cxw, czw);
     const top = Math.max(surf, SEA_LEVEL) + 8;
     let bot = surf - LOAD_DEPTH;
-    // クレーター(爆発イベント)がこの列に掛かるなら、その底まで深くロードする。
+    // クレーター(爆発イベント)がこのチャンク列に掛かるなら、その底まで深くロードする。
     // ミサイルで LOAD_DEPTH より深く掘った穴の底が「青空(未ロード)」になるバグ対策（近傍イベントのみ走査）。
+    // ⚠ 旧版は「列の中心点」が R 内かで判定していたため、クレーター縁のチャンク(中心は円の外だが
+    //   隅は穴の中＝壁ブロックを含む)が深くロードされず、壁が未メッシュになり背景の青空が透けた
+    //   (底＝中央列は中心が R 内なので出る)。チャンクのXZ範囲(16幅)と爆発円の重なり=最近点距離で
+    //   判定し、縁のチャンクも深く読む。
+    const x0 = ccx * CS, x1 = x0 + CS - 1, z0 = ccz * CS, z1 = z0 + CS - 1;
     for (let i = 0; i < _nearEvents.length; i++) {
         const ev = _nearEvents[i];
-        const dx = cxw - ev.cx, dz = czw - ev.cz;
+        const nx = ev.cx < x0 ? x0 : (ev.cx > x1 ? x1 : ev.cx); // チャンクAABB上の最近点
+        const nz = ev.cz < z0 ? z0 : (ev.cz > z1 ? z1 : ev.cz);
+        const dx = nx - ev.cx, dz = nz - ev.cz;
         if (dx * dx + dz * dz <= ev.R * ev.R) {
             const evBot = Math.max(worldBottomY + 1, Math.floor(ev.cy) - Math.min(ev.R, 30));
             if (evBot < bot) bot = evBot;
