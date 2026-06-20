@@ -340,6 +340,30 @@
                 finally { explosionEvents.length = evLen; camera.position.copy(camSave); camera.updateMatrixWorld(true); }
             });
 
+            // 11h) 敵が全滅したら勝者軍が自動消去される＋敵がいる間はタイマーがリセットされる（残党対策）
+            run(results, 'one-sided battle auto-despawns', () => {
+                const camSave = camera.position.clone();
+                try {
+                    clearAgents();
+                    const X = T + 660, Z = T + 660;
+                    const baseY = Math.max(terrainHeightAt(X, Z), SEA_LEVEL) + 4;
+                    for (let dx = -12; dx <= 12; dx++) for (let dz = -12; dz <= 12; dz++) setBlockData(X + dx, baseY, Z + dz, BLOCKS.STONE);
+                    camera.position.set(X, baseY + 2, Z);
+                    agents.push(_makeAgent(X, baseY + 1, Z, 0));   // 赤のみ＝敵不在
+                    for (let s = 0; s < 40; s++) updateAgents(0.05); // 2秒
+                    const t1 = _battleOverTimer;                     // >0（敵不在でカウント中）
+                    agents.push(_makeAgent(X + 2, baseY + 1, Z, 1)); // 青を追加＝敵出現
+                    updateAgents(0.05); updateAgents(0.05);
+                    const t2 = _battleOverTimer;                     // ~0（両陣営そろってリセット）
+                    for (const a of agents) if (a.faction === 1) a.alive = false; // 青を全滅
+                    let cleared = false;
+                    for (let s = 0; s < 260; s++) { updateAgents(0.05); if (agents.length === 0) { cleared = true; break; } } // ~13秒以内に消える
+                    clearAgents();
+                    return { ok: t1 > 1.0 && t2 < 0.2 && cleared, detail: { t1: +t1.toFixed(1), t2: +t2.toFixed(2), cleared: cleared } };
+                } catch (e) { clearAgents(); return { ok: false, detail: 'ERR ' + (e && e.message) }; }
+                finally { camera.position.copy(camSave); camera.updateMatrixWorld(true); }
+            });
+
             // 12) スポーンが固体地面の上（水中/空中でない）
             run(results, 'spawn on solid ground', () => {
                 spawnPlayer();

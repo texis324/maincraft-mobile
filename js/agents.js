@@ -8,17 +8,20 @@
 //      射線(LOS)判定の voxelRaycast は「発射クールダウン時だけ」走らせてレイ数を抑える。
 //   ④ 距離カリング＝ロード済み領域(VIEW_DIST)の外のユニットは消滅。
 
-const AGENT_MAX = 260;            // 同時生存上限
-const AGENT_WAVE = 28;            // 召喚1回で出す総数（赤14＋青14）
-const AGENT_THINK_BUDGET = 14;    // 1フレームに索敵するユニット数（ラウンドロビン）
+const AGENT_MAX = 800;            // 同時生存上限（大規模戦争・連打で増援して埋める）
+const AGENT_WAVE = 80;            // 召喚1回で出す総数（赤40＋青40）
+const AGENT_THINK_BUDGET = 24;    // 1フレームに索敵するユニット数（ラウンドロビン）
 const AGENT_SPEED = 4.2;          // 水平移動速度
 const AGENT_GRAVITY = 24.0;
 const AGENT_H = 1.7;             // 見た目の高さ
 let _agentDeathFxCD = 0;         // 戦死パフの throttle
+// 敵が全滅して（＝1陣営だけ残って）この秒数たったら、勝者軍を自動で消去する（残党が邪魔なので）。
+const AGENT_DESPAWN_DELAY = 10;
+let _battleOverTimer = 0;
 
 // --- 射撃パラメータ ---
 const AGENT_HP = 6;               // 各兵のHP
-const AGENT_SIGHT = 64;           // 索敵半径
+const AGENT_SIGHT = 90;           // 索敵半径（大規模で広く展開しても全員が敵を見つけて収束するよう広め）
 const AGENT_SIGHT2 = AGENT_SIGHT * AGENT_SIGHT;
 const AGENT_FIRE_RANGE = 20;      // 射撃の射程（これ以内＆LOSが通れば停止して撃つ）
 const AGENT_FIRE_CD = 0.6;        // 発射間隔（秒・±ジッタ）
@@ -50,7 +53,7 @@ const _agentDummy = new THREE.Object3D();
 const _gunDummy = new THREE.Object3D();
 
 // --- 曳光弾（tracer）プール: 全弾を1つの LineSegments で描く（1ドローコール） ---
-const TRACER_MAX = 512;
+const TRACER_MAX = 1024;
 const TRACER_LIFE = 0.09;        // 一瞬光って消える（秒）
 const tracers = [];              // {x0,y0,z0,x1,y1,z1, life, r,g,b}
 let tracerLines = null, tracerGeo = null;
@@ -128,8 +131,8 @@ function summonLegion() {
     for (let f = 0; f < 2; f++) {
         const baseAng = (f === 0) ? Math.PI : 0;   // 赤=西、青=東
         for (let i = 0; i < perSide && agents.length < AGENT_MAX; i++) {
-            const ang = baseAng + (Math.random() - 0.5) * 1.2;
-            const r = 16 + Math.random() * 12;
+            const ang = baseAng + (Math.random() - 0.5) * 1.6;
+            const r = 18 + Math.random() * 26; // 自陣側に広く展開（大軍が密集しすぎないよう）
             const x = px + Math.cos(ang) * r, z = pz + Math.sin(ang) * r;
             const top = columnTopY(Math.floor(x), Math.floor(z));
             const y = Math.max(top, SEA_LEVEL) + 1;
@@ -306,10 +309,12 @@ function updateAgents(delta) {
         }
     }
 
-    // ③ 本体＋銃の行列、陣営色を書き込み（本体1＋銃1ドローコール）
+    // ③ 本体＋銃の行列、陣営色を書き込み（本体1＋銃1ドローコール）。ついでに陣営の生存を集計。
     const n = Math.min(agents.length, AGENT_MAX);
+    let sawF0 = false, sawF1 = false;
     for (let i = 0; i < n; i++) {
         const a = agents[i];
+        if (a.faction === 0) sawF0 = true; else sawF1 = true;
         const h = a.heading, ry = Math.PI / 2 - h;
         _agentDummy.position.set(a.x, a.y - 0.5 + AGENT_H * 0.5, a.z);
         _agentDummy.rotation.set(0, ry, 0);
@@ -327,6 +332,15 @@ function updateAgents(delta) {
     agentMesh.count = n; agentMesh.instanceMatrix.needsUpdate = true;
     if (agentMesh.instanceColor) agentMesh.instanceColor.needsUpdate = true;
     gunMesh.count = n; gunMesh.instanceMatrix.needsUpdate = true;
+
+    // 敵が全滅して1陣営だけ残ったら、DESPAWN_DELAY 秒後に勝者軍を自動消去（残党が邪魔なので）。
+    // 両陣営そろっている／空ならタイマーをリセット（増援召喚で敵が戻れば即リセット）。
+    if (n > 0 && !(sawF0 && sawF1)) {
+        _battleOverTimer += dt;
+        if (_battleOverTimer >= AGENT_DESPAWN_DELAY) { clearAgents(); _battleOverTimer = 0; }
+    } else {
+        _battleOverTimer = 0;
+    }
 
     updateTracers(dt);
 }
