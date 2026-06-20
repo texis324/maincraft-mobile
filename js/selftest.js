@@ -246,9 +246,41 @@
                     genArea(X, Z, 2);
                     const n = summonLegion();
                     for (let s = 0; s < 12; s++) updateAgents(0.05); // 物理を決定的に手動step（例外が出ないこと）
-                    const ok = n > 0 && agents.length > 0 && !!agentMesh && agentMesh.count === Math.min(agents.length, AGENT_MAX);
+                    // 陣営色が instanceColor バッファに実際に書かれているか（赤優勢/青優勢が両方存在）。
+                    // setColorAt の確保タイミングを壊すと色が全てサイレント無視される回帰を検出する。
+                    const ic = agentMesh ? agentMesh.instanceColor : null;
+                    const lenOk = !!ic && ic.array.length === AGENT_MAX * 3;
+                    let hasRed = false, hasBlue = false;
+                    if (ic) for (let i = 0; i < agentMesh.count; i++) {
+                        const r = ic.array[i * 3], b = ic.array[i * 3 + 2];
+                        if (r > 0.4 && r > b + 0.15) hasRed = true;
+                        if (b > 0.4 && b > r + 0.15) hasBlue = true;
+                    }
+                    const ok = n > 0 && agents.length > 0 && !!agentMesh && agentMesh.count === Math.min(agents.length, AGENT_MAX) && lenOk && hasRed && hasBlue;
+                    const meshCount = agentMesh ? agentMesh.count : -1;
                     clearAgents();
-                    return { ok: ok, detail: { spawned: n, alive: agents.length, meshCount: agentMesh ? agentMesh.count : -1 } };
+                    return { ok: ok, detail: { spawned: n, alive: agents.length, meshCount: meshCount, lenOk: lenOk, hasRed: hasRed, hasBlue: hasBlue } };
+                } catch (e) { clearAgents(); return { ok: false, detail: 'ERR ' + (e && e.message) }; }
+                finally { camera.position.copy(camSave); camera.updateMatrixWorld(true); }
+            });
+
+            // 11f) AI陣営戦: 隣接した赤×青を白兵戦させ、HPが減る／撃破される（近接戦闘＋HPが機能）
+            run(results, 'AI faction melee combat', () => {
+                const camSave = camera.position.clone();
+                try {
+                    clearAgents();
+                    const X = T + 600, Z = T + 600;
+                    genArea(X, Z, 1);
+                    const gy = Math.max(columnTopY(X, Z), SEA_LEVEL);
+                    camera.position.set(X, gy + 3, Z);
+                    agents.push(_makeAgent(X, gy + 1, Z, 0));        // 赤
+                    agents.push(_makeAgent(X + 1, gy + 1, Z, 1));    // 青（1ブロック隣＝即engaged）
+                    for (let s = 0; s < 60; s++) updateAgents(0.05); // 3秒ぶん戦わせる
+                    const remaining = agents.length;
+                    const died = remaining < 2;
+                    const hurt = agents.some(a => a.hp < AGENT_HP);
+                    clearAgents();
+                    return { ok: died || hurt, detail: { remaining: remaining, died: died, hurt: hurt } };
                 } catch (e) { clearAgents(); return { ok: false, detail: 'ERR ' + (e && e.message) }; }
                 finally { camera.position.copy(camSave); camera.updateMatrixWorld(true); }
             });

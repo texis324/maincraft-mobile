@@ -1,23 +1,40 @@
-// --- AI破壊軍団（destruction legion） ---
-// 「召喚すると世界をカオスに破壊する」ボクセル兵の群れ。性能対策が肝なので以下を徹底:
-//   ① 描画＝THREE.InstancedMesh（全ユニットを1ドローコール・数百体でも軽い）
-//   ② 思考＝ラウンドロビン（1フレームに数体だけ heading 更新、残りは惰性）
+// --- AI破壊軍団（destruction legion）＋陣営戦（赤軍 vs 青軍） ---
+// 「召喚すると赤軍と青軍が左右から湧いて会戦＝近接で殴り合い、勝った側はそのまま世界を破壊する」。
+// 性能対策が肝（数百体でも軽い）なので以下を徹底:
+//   ① 描画＝THREE.InstancedMesh（全ユニットを1ドローコール）＋ setColorAt で陣営色を per-instance 着色
+//   ② 思考＝ラウンドロビン（1フレームに数体だけ「最寄りの敵を索敵」、残りは惰性で前進）
 //   ③ 破壊＝遅延メッシュ（setBlockData+markDirty で dirty に積むだけ→main.js が予算で flush）。
 //      edit は記録しない＝localStorage 肥大と再生成コストを避ける（破壊はライブ演出・リロードで世界が癒える）
 //   ④ 距離カリング＝ロード済み領域(VIEW_DIST)の外に出たユニットは消滅（落下し続ける無駄を防ぐ）
-// faction フィールドを持たせて将来の「陣営戦（赤軍 vs 青軍）」に拡張できる構造にしておく（v1は全員 faction 0）。
+// 戦闘は「核なし」＝近接melee のみ（爆発は地形破壊の副産物としてのみ・敵に核は撃たない）。
 
 const AGENT_MAX = 260;            // 同時生存上限（描画/思考の予算上限）
-const AGENT_WAVE = 28;            // 召喚1回で出す数
-const AGENT_THINK_BUDGET = 14;    // 1フレームに「思考」するユニット数（ラウンドロビン）
+const AGENT_WAVE = 28;            // 召喚1回で出す総数（赤14＋青14で会戦になる）
+const AGENT_THINK_BUDGET = 14;    // 1フレームに「索敵」するユニット数（ラウンドロビン）
 const AGENT_SPEED = 4.2;          // 水平移動速度
 const AGENT_GRAVITY = 24.0;
 const AGENT_DIG_CD = 0.32;        // 破壊クールダウン（秒）
 const AGENT_H = 1.7;             // 見た目の高さ
-const AGENT_BLAST_CHANCE = 0.035; // 破壊時に稀に小爆発（チャオス演出）
+const AGENT_BLAST_CHANCE = 0.035; // 破壊時に稀に小爆発（チャオス演出・戦闘中の兵は出さない）
 let _agentBlastCD = 0;           // 小爆発のグローバルクールダウン（性能スパイク防止）
+let _agentDeathFxCD = 0;         // 戦死パフの throttle（大量死で破片スパイクを防ぐ）
 
-// 各エージェント: { x,y,z(float世界座標), vy, heading(ラジアン), grounded, digCd, digTarget, faction, hp }
+// --- 陣営戦パラメータ ---
+const AGENT_HP = 6;               // 各兵のHP
+const AGENT_SIGHT = 64;           // 索敵半径（召喚時の左右間隔 ≤56 を見渡せる＝湧いた瞬間に進軍開始）
+const AGENT_SIGHT2 = AGENT_SIGHT * AGENT_SIGHT;
+const AGENT_ATK_RANGE = 1.7;      // 近接攻撃の射程（水平距離）
+const AGENT_ATK_DMG = 2;          // 1撃のダメージ（HP6 ⇒ 3発で撃破）
+const AGENT_ATK_CD = 0.5;         // 攻撃クールダウン（秒）
+
+// 陣営色（per-instance tint）。本体テクスチャを明るめグレーにしてあるので tint が鮮やかに乗る。
+const _cRed = new THREE.Color(1.0, 0.22, 0.18);   // 赤軍
+const _cBlue = new THREE.Color(0.30, 0.55, 1.0);  // 青軍
+const _cWhite = new THREE.Color(1, 1, 1);          // 被弾フラッシュ
+const _cTmp = new THREE.Color();
+
+// 各エージェント: { x,y,z(float世界座標), vy, heading(ラジアン), grounded, digCd, digTarget,
+//                   faction(0=赤/1=青), hp, target(敵エージェント参照|null), atkCd, hitFlash, alive }
 const agents = [];
 let agentMesh = null;            // THREE.InstancedMesh
 let _agentThinkPtr = 0;
@@ -26,11 +43,11 @@ const _agentDummy = new THREE.Object3D();
 function createAgentTexture() {
     const c = document.createElement('canvas'); c.width = c.height = 32;
     const x = c.getContext('2d');
-    x.fillStyle = '#2b2f33'; x.fillRect(0, 0, 32, 32);                 // 暗い金属の胴体
-    x.fillStyle = '#1a1c1f'; for (let i = 0; i < 32; i += 8) x.fillRect(i, 0, 2, 32); // パネルライン
-    x.fillStyle = '#3a3f44'; x.fillRect(0, 0, 32, 6);                 // 肩
-    x.fillStyle = '#ff1744'; x.fillRect(8, 11, 5, 5); x.fillRect(19, 11, 5, 5); // 赤く光る目
-    x.fillStyle = '#7a0010'; x.fillRect(11, 20, 10, 3);              // 口（赤い線）
+    x.fillStyle = '#9aa0a8'; x.fillRect(0, 0, 32, 32);                 // 明るめの金属の胴体（陣営tintが鮮やかに乗る）
+    x.fillStyle = '#6b7077'; for (let i = 0; i < 32; i += 8) x.fillRect(i, 0, 2, 32); // パネルライン
+    x.fillStyle = '#b4bac2'; x.fillRect(0, 0, 32, 6);                 // 肩
+    x.fillStyle = '#ffffff'; x.fillRect(8, 11, 5, 5); x.fillRect(19, 11, 5, 5); // 光る目（tintで陣営色になる）
+    x.fillStyle = '#2b2d31'; x.fillRect(11, 20, 10, 3);              // 口（暗い線）
     const t = new THREE.CanvasTexture(c); t.magFilter = THREE.NearestFilter; return t;
 }
 
@@ -41,28 +58,44 @@ function initAgentMesh() {
     agentMesh = new THREE.InstancedMesh(geo, mat, AGENT_MAX);
     agentMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     agentMesh.frustumCulled = false; // 自前で距離カリングするので常時描画（1ドローコール）
+    // ⚠ instanceColor は count=0 にする前に AGENT_MAX サイズで明示確保する。r128 の setColorAt は
+    //   「呼んだ瞬間の count」で Float32Array(3*count) を一度だけ確保し二度と作り直さない。count=0 で
+    //   先に呼ぶと長さ0配列になり、以降の陣営色(赤/青tint)書き込みが全てサイレント無視される（敵対監査で発見）。
+    agentMesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(AGENT_MAX * 3), 3);
+    agentMesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
     agentMesh.count = 0;
     scene.add(agentMesh);
 }
 
-// プレイヤー周囲の地表に AGENT_WAVE 体を召喚（上限まで）。連打で増援できる。
+// 1体を生成して返す（summon と selftest が共用）。
+function _makeAgent(x, y, z, faction, heading) {
+    return {
+        x: x, y: y, z: z, vy: 0,
+        heading: (heading === undefined) ? Math.random() * Math.PI * 2 : heading,
+        grounded: false, digCd: Math.random() * AGENT_DIG_CD, digTarget: null,
+        faction: faction, hp: AGENT_HP, target: null,
+        atkCd: Math.random() * AGENT_ATK_CD, hitFlash: 0, alive: true
+    };
+}
+
+// プレイヤーの左右に赤軍・青軍を同時召喚＝中央で会戦になる。連打で増援（上限まで）。
 function summonLegion() {
     initAgentMesh();
     const px = camera.position.x, pz = camera.position.z;
     let spawned = 0;
-    for (let i = 0; i < AGENT_WAVE && agents.length < AGENT_MAX; i++) {
-        const ang = (i / AGENT_WAVE) * Math.PI * 2 + Math.random() * 0.6;
-        const r = 7 + Math.random() * 12;
-        const x = px + Math.cos(ang) * r, z = pz + Math.sin(ang) * r;
-        const top = columnTopY(Math.floor(x), Math.floor(z));
-        const y = Math.max(top, SEA_LEVEL) + 1;
-        agents.push({
-            x: x, y: y, z: z, vy: 0,
-            heading: Math.random() * Math.PI * 2,
-            grounded: false, digCd: Math.random() * AGENT_DIG_CD, digTarget: null,
-            faction: 0, hp: 3
-        });
-        spawned++;
+    const perSide = Math.floor(AGENT_WAVE / 2);
+    for (let f = 0; f < 2; f++) {
+        const baseAng = (f === 0) ? Math.PI : 0;   // 赤=西、青=東
+        for (let i = 0; i < perSide && agents.length < AGENT_MAX; i++) {
+            const ang = baseAng + (Math.random() - 0.5) * 1.2; // 自陣側の弧にばらける
+            const r = 16 + Math.random() * 12;
+            const x = px + Math.cos(ang) * r, z = pz + Math.sin(ang) * r;
+            const top = columnTopY(Math.floor(x), Math.floor(z));
+            const y = Math.max(top, SEA_LEVEL) + 1;
+            // 初期向きは中央（敵陣）へ＝湧いた瞬間から進軍
+            agents.push(_makeAgent(x, y, z, f, baseAng + Math.PI + (Math.random() - 0.5) * 0.4));
+            spawned++;
+        }
     }
     if (spawned > 0 && typeof playSound === 'function') playSound('ignite');
     return spawned;
@@ -90,26 +123,46 @@ function _agentDestroy(x, y, z) {
 function updateAgents(delta) {
     if (!agentMesh || agents.length === 0) { if (agentMesh) agentMesh.count = 0; return; }
     if (_agentBlastCD > 0) _agentBlastCD -= delta;
+    if (_agentDeathFxCD > 0) _agentDeathFxCD -= delta;
     const dt = Math.min(delta, 0.05);
     const px = camera.position.x, pz = camera.position.z;
     const cull = VIEW_DIST * 16; // ロード済み領域の外に出たら消滅（getBlock=0 で落下し続ける無駄を防ぐ）
 
-    // ① 思考（ラウンドロビン）: 予算分だけ heading を更新（残りは惰性）
-    const thinkN = Math.min(AGENT_THINK_BUDGET, agents.length);
+    // ① 索敵（ラウンドロビン）: 予算分だけ「最寄りの敵陣ユニット」を target に。敵が居なければ徘徊向きを散らす。
+    const nThink = agents.length;
+    const thinkN = Math.min(AGENT_THINK_BUDGET, nThink);
     for (let k = 0; k < thinkN; k++) {
-        const a = agents[(_agentThinkPtr + k) % agents.length];
-        if (a && Math.random() < 0.5) a.heading += (Math.random() - 0.5) * 1.6; // ふらつき徘徊（将来: 村/城/敵を狙う）
+        const a = agents[(_agentThinkPtr + k) % nThink];
+        if (!a || !a.alive) continue;
+        let best = null, bestD = AGENT_SIGHT2;
+        for (let j = 0; j < nThink; j++) {
+            const b = agents[j];
+            if (!b || !b.alive || b.faction === a.faction) continue;
+            const dx = b.x - a.x, dz = b.z - a.z, dy = b.y - a.y;
+            const d = dx * dx + dz * dz + dy * dy * 0.5; // 縦は半分重み（高低差は越えやすい）
+            if (d < bestD) { bestD = d; best = b; }
+        }
+        a.target = best;
+        if (!best && Math.random() < 0.5) a.heading += (Math.random() - 0.5) * 1.6; // 敵不在＝ふらつき徘徊（地形破壊モード）
     }
-    _agentThinkPtr = (_agentThinkPtr + thinkN) % Math.max(1, agents.length);
+    _agentThinkPtr = (_agentThinkPtr + thinkN) % Math.max(1, nThink);
 
-    // ② 移動＋破壊（全エージェント・軽い処理）
+    // ② 移動＋戦闘＋破壊（全エージェント・軽い処理）
     for (let i = agents.length - 1; i >= 0; i--) {
         const a = agents[i];
-        // 距離カリング / 奈落落下で消滅
-        if (Math.abs(a.x - px) > cull || Math.abs(a.z - pz) > cull || a.y < worldBottomY + 1) {
-            agents.splice(i, 1);
-            continue;
+        // 戦死 / 距離カリング / 奈落落下で消滅（参照されても無効と分かるよう alive を倒してから splice）
+        if (!a.alive || a.hp <= 0) {
+            a.alive = false;
+            if (_agentDeathFxCD <= 0 && typeof createBlockParticles === 'function') {
+                _agentDeathFxCD = 0.08; createBlockParticles(a.x, a.y, a.z, BLOCKS.STONE, 2, 0.14);
+            }
+            agents.splice(i, 1); continue;
         }
+        if (Math.abs(a.x - px) > cull || Math.abs(a.z - pz) > cull || a.y < worldBottomY + 1) {
+            a.alive = false; agents.splice(i, 1); continue;
+        }
+        if (a.hitFlash > 0) a.hitFlash -= dt;
+        if (a.atkCd > 0) a.atkCd -= dt;
 
         // 重力＋接地
         a.vy -= AGENT_GRAVITY * dt;
@@ -123,8 +176,29 @@ function updateAgents(delta) {
             a.y += a.vy * dt;
         }
 
-        // 水平移動（接地時のみ前進）。壁にぶつかったら段差は登り、壁は破壊対象にする。
-        if (a.grounded) {
+        // 敵を捕捉していれば、その方向を向く。射程内なら殴る（engaged＝前進せず白兵戦）。
+        let tgt = a.target;
+        if (tgt && (!tgt.alive || tgt.hp <= 0)) tgt = a.target = null;
+        let engaged = false;
+        if (tgt) {
+            const dxt = tgt.x - a.x, dzt = tgt.z - a.z, dyt = tgt.y - a.y;
+            const distH = Math.sqrt(dxt * dxt + dzt * dzt);
+            a.heading = Math.atan2(dzt, dxt); // 敵を追尾（毎フレーム向き直し＝滑らかに追う）
+            if (distH <= AGENT_ATK_RANGE && Math.abs(dyt) <= 2.2) {
+                engaged = true;
+                if (a.atkCd <= 0 && a.grounded) {
+                    a.atkCd = AGENT_ATK_CD;
+                    tgt.hp -= AGENT_ATK_DMG;
+                    tgt.hitFlash = 0.2;
+                    tgt.vy = Math.max(tgt.vy, 2.5);                 // 被弾で軽くのけぞる
+                    const inv = 1 / (distH || 1);
+                    tgt.x += dxt * inv * 0.1; tgt.z += dzt * inv * 0.1; // 小ノックバック
+                }
+            }
+        }
+
+        // 水平移動（接地時＆非engaged）。壁にぶつかったら段差は登り、壁は破壊対象にする。
+        if (a.grounded && !engaged) {
             const hx = Math.cos(a.heading), hz = Math.sin(a.heading);
             const nx = a.x + hx * AGENT_SPEED * dt;
             const nz = a.z + hz * AGENT_SPEED * dt;
@@ -143,27 +217,31 @@ function updateAgents(delta) {
             }
         }
 
-        // ③ 破壊（クールダウン）。digTarget があればそれを、無ければ進行方向の足元/体の固体を壊す＝常に何か破壊
-        a.digCd -= dt;
-        if (a.digCd <= 0 && a.grounded) {
-            a.digCd = AGENT_DIG_CD;
-            let tx, ty, tz;
-            if (a.digTarget) { tx = a.digTarget[0]; ty = a.digTarget[1]; tz = a.digTarget[2]; a.digTarget = null; }
-            else {
-                const hx = Math.cos(a.heading), hz = Math.sin(a.heading), fy = Math.floor(a.y);
-                tx = Math.floor(a.x + hx); ty = fy; tz = Math.floor(a.z + hz);
-                if (!_agentSolid(tx, ty, tz)) ty = fy - 1; // 前が空なら足元を掘る
-            }
-            if (_agentDestroy(tx, ty, tz)) {
-                if (_agentBlastCD <= 0 && Math.random() < AGENT_BLAST_CHANCE) {
-                    _agentBlastCD = 0.2; // グローバルCD＝小爆発のスパイク抑制
-                    explode(tx, ty, tz, false, 3);
+        // ③ 破壊（クールダウン）。engaged（白兵戦中）の兵は地形を掘らない＝戦闘に専念。
+        //    digTarget があればそれを、無ければ進行方向の足元/体の固体を壊す＝常に何か破壊。
+        if (!engaged) {
+            a.digCd -= dt;
+            if (a.digCd <= 0 && a.grounded) {
+                a.digCd = AGENT_DIG_CD;
+                let tx, ty, tz;
+                if (a.digTarget) { tx = a.digTarget[0]; ty = a.digTarget[1]; tz = a.digTarget[2]; a.digTarget = null; }
+                else {
+                    const hx = Math.cos(a.heading), hz = Math.sin(a.heading), fy = Math.floor(a.y);
+                    tx = Math.floor(a.x + hx); ty = fy; tz = Math.floor(a.z + hz);
+                    if (!_agentSolid(tx, ty, tz)) ty = fy - 1; // 前が空なら足元を掘る
+                }
+                if (_agentDestroy(tx, ty, tz)) {
+                    // 小爆発は「敵を追っていない（地形破壊モード）」の兵だけ＝会戦中に爆発で薙ぎ払わない
+                    if (!a.target && _agentBlastCD <= 0 && Math.random() < AGENT_BLAST_CHANCE) {
+                        _agentBlastCD = 0.2; // グローバルCD＝小爆発のスパイク抑制
+                        explode(tx, ty, tz, false, 3);
+                    }
                 }
             }
         }
     }
 
-    // ④ インスタンス行列を書き込み（1ドローコール）
+    // ④ インスタンス行列＋陣営色を書き込み（1ドローコール）
     const n = Math.min(agents.length, AGENT_MAX);
     for (let i = 0; i < n; i++) {
         const a = agents[i];
@@ -171,7 +249,11 @@ function updateAgents(delta) {
         _agentDummy.rotation.set(0, -a.heading + Math.PI / 2, 0);
         _agentDummy.updateMatrix();
         agentMesh.setMatrixAt(i, _agentDummy.matrix);
+        _cTmp.copy(a.faction === 0 ? _cRed : _cBlue);
+        if (a.hitFlash > 0) _cTmp.lerp(_cWhite, Math.min(1, a.hitFlash * 4)); // 被弾で白フラッシュ
+        agentMesh.setColorAt(i, _cTmp);
     }
     agentMesh.count = n;
     agentMesh.instanceMatrix.needsUpdate = true;
+    if (agentMesh.instanceColor) agentMesh.instanceColor.needsUpdate = true;
 }
