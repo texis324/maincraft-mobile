@@ -1,10 +1,11 @@
 // --- AI 陣営戦（赤軍 vs 青軍） ---
 // 「召喚すると赤軍と青軍が左右から湧いて会戦＝近接で殴り合う」。地形は壊さない（侵食なし＝シンプルに戦うだけ）。
+// プレイヤーの爆発（ミサイル/核/TNT等）でも倒せる（killAgentsInRadius を explode から呼ぶ）。
 // 性能対策が肝（数百体でも軽い）なので以下を徹底:
 //   ① 描画＝THREE.InstancedMesh（全ユニットを1ドローコール）＋ setColorAt で陣営色を per-instance 着色
 //   ② 思考＝ラウンドロビン（1フレームに数体だけ「最寄りの敵を索敵」、残りは惰性で前進）
 //   ③ 距離カリング＝ロード済み領域(VIEW_DIST)の外に出たユニットは消滅（落下し続ける無駄を防ぐ）
-// 戦闘は近接melee のみ（核なし）。地形の掘削/破壊は一切しない（壁は1段差なら登り、それ以上は回り込む）。
+// 戦闘は近接melee のみ（核なし）。地形の掘削/破壊は一切しない（壁は1段差なら登り、それ以上は横へ回り込む）。
 
 const AGENT_MAX = 260;            // 同時生存上限（描画/思考の予算上限）
 const AGENT_WAVE = 28;            // 召喚1回で出す総数（赤14＋青14で会戦になる）
@@ -22,13 +23,19 @@ const AGENT_ATK_RANGE = 1.7;      // 近接攻撃の射程（水平距離）
 const AGENT_ATK_DMG = 2;          // 1撃のダメージ（HP6 ⇒ 3発で撃破）
 const AGENT_ATK_CD = 0.5;         // 攻撃クールダウン（秒）
 
+// 障害物回避: 進行方向(heading)が塞がれていたら、左右にこの角度オフセット順で候補を試し
+// 最初に通れる方向へ動く＝壁際でその場ふらつき(つっかえ)せず必ず迂回して前進する。
+// turnDir で各兵の「好む回り込み側」を分け、みんなが同じ側に寄って団子化するのを防ぐ。
+const _AGENT_AVOID_R = [0, 0.5, -0.5, 1.0, -1.0, 1.6, -1.6, 2.4, -2.4];
+const _AGENT_AVOID_L = [0, -0.5, 0.5, -1.0, 1.0, -1.6, 1.6, -2.4, 2.4];
+
 // 陣営色（per-instance tint）。本体テクスチャを明るめグレーにしてあるので tint が鮮やかに乗る。
 const _cRed = new THREE.Color(1.0, 0.22, 0.18);   // 赤軍
 const _cBlue = new THREE.Color(0.30, 0.55, 1.0);  // 青軍
 const _cWhite = new THREE.Color(1, 1, 1);          // 被弾フラッシュ
 const _cTmp = new THREE.Color();
 
-// 各エージェント: { x,y,z(float世界座標), vy, heading(ラジアン), grounded,
+// 各エージェント: { x,y,z(float世界座標), vy, heading(ラジアン), grounded, turnDir(±1),
 //                   faction(0=赤/1=青), hp, target(敵エージェント参照|null), atkCd, hitFlash, alive }
 const agents = [];
 let agentMesh = null;            // THREE.InstancedMesh
@@ -40,9 +47,11 @@ function createAgentTexture() {
     const x = c.getContext('2d');
     x.fillStyle = '#9aa0a8'; x.fillRect(0, 0, 32, 32);                 // 明るめの金属の胴体（陣営tintが鮮やかに乗る）
     x.fillStyle = '#6b7077'; for (let i = 0; i < 32; i += 8) x.fillRect(i, 0, 2, 32); // パネルライン
-    x.fillStyle = '#b4bac2'; x.fillRect(0, 0, 32, 6);                 // 肩
-    x.fillStyle = '#ffffff'; x.fillRect(8, 11, 5, 5); x.fillRect(19, 11, 5, 5); // 光る目（tintで陣営色になる）
-    x.fillStyle = '#2b2d31'; x.fillRect(11, 20, 10, 3);              // 口（暗い線）
+    // 軍隊っぽいヘルメット（上部にドーム＋暗いブリム）。tint で陣営色のヘルメットになる。
+    x.fillStyle = '#5f656d'; x.fillRect(0, 0, 32, 9);                 // ヘルメットのドーム（胴体より暗い）
+    x.fillStyle = '#2f3236'; x.fillRect(0, 9, 32, 2);                 // ブリム（縁の暗い線）
+    x.fillStyle = '#ffffff'; x.fillRect(8, 14, 5, 5); x.fillRect(19, 14, 5, 5); // 光る目（ブリムの下・tintで陣営色）
+    x.fillStyle = '#2b2d31'; x.fillRect(11, 23, 10, 3);              // 口（暗い線）
     const t = new THREE.CanvasTexture(c); t.magFilter = THREE.NearestFilter; return t;
 }
 
@@ -67,7 +76,7 @@ function _makeAgent(x, y, z, faction, heading) {
     return {
         x: x, y: y, z: z, vy: 0,
         heading: (heading === undefined) ? Math.random() * Math.PI * 2 : heading,
-        grounded: false,
+        grounded: false, turnDir: Math.random() < 0.5 ? 1 : -1,
         faction: faction, hp: AGENT_HP, target: null,
         atkCd: Math.random() * AGENT_ATK_CD, hitFlash: 0, alive: true
     };
@@ -99,6 +108,21 @@ function summonLegion() {
 function clearAgents() {
     agents.length = 0;
     if (agentMesh) agentMesh.count = 0;
+}
+
+// プレイヤーの爆発（ミサイル/核/TNT/ロケット等）が兵を巻き込んだら倒す。explode から呼ばれる。
+// 半径内は即死（爆発は致死）。updateAgents が次フレームで除去＆破片パフを出す。
+function killAgentsInRadius(cx, cy, cz, radius) {
+    if (!agents.length) return 0;
+    const r2 = radius * radius;
+    let killed = 0;
+    for (let i = 0; i < agents.length; i++) {
+        const a = agents[i];
+        if (!a.alive) continue;
+        const dx = a.x - cx, dy = a.y - cy, dz = a.z - cz;
+        if (dx * dx + dy * dy + dz * dz <= r2) { a.hp = 0; a.alive = false; killed++; }
+    }
+    return killed;
 }
 
 function _agentSolid(x, y, z) {
@@ -182,22 +206,24 @@ function updateAgents(delta) {
             }
         }
 
-        // 水平移動（接地時＆非engaged）。壁は1段差なら登り、それ以上は向きを散らして回り込む（掘らない＝侵食なし）。
+        // 水平移動（接地時＆非engaged）。進行方向が塞がれていたら左右に振った候補から通れる方を選ぶ＝
+        // 壁際でつっかえず必ず迂回。a.heading（＝敵/徘徊の向き＝顔の向き）は変えず、移動方向だけ振る。
         if (a.grounded && !engaged) {
-            const hx = Math.cos(a.heading), hz = Math.sin(a.heading);
-            const nx = a.x + hx * AGENT_SPEED * dt;
-            const nz = a.z + hz * AGENT_SPEED * dt;
-            const bx = Math.floor(nx + hx * 0.4), bz = Math.floor(nz + hz * 0.4);
             const fy = Math.floor(a.y);
-            if (_agentSolid(bx, fy, bz)) {
-                if (!_agentSolid(bx, fy + 1, bz) && !_agentSolid(bx, fy + 2, bz)) {
-                    a.y += 1; a.x = nx; a.z = nz; // 1段差は登る
-                } else {
-                    a.heading += (Math.random() - 0.5) * 1.4; // 壁＝向きを散らして回り込む（地形は壊さない）
+            const offs = a.turnDir > 0 ? _AGENT_AVOID_R : _AGENT_AVOID_L;
+            let moved = false;
+            for (let o = 0; o < offs.length; o++) {
+                const h = a.heading + offs[o];
+                const hx = Math.cos(h), hz = Math.sin(h);
+                const nx = a.x + hx * AGENT_SPEED * dt, nz = a.z + hz * AGENT_SPEED * dt;
+                const bx = Math.floor(nx + hx * 0.4), bz = Math.floor(nz + hz * 0.4);
+                if (!_agentSolid(bx, fy, bz)) { a.x = nx; a.z = nz; moved = true; break; }       // その方向は空いてる
+                if (!_agentSolid(bx, fy + 1, bz) && !_agentSolid(bx, fy + 2, bz)) {              // 1段差は登る
+                    a.y += 1; a.x = nx; a.z = nz; moved = true; break;
                 }
-            } else {
-                a.x = nx; a.z = nz;
             }
+            // どの方向も塞がれている（穴/箱詰め）＝向きを反転して脱出を試みる
+            if (!moved) { a.heading += Math.PI + (Math.random() - 0.5); a.turnDir = -a.turnDir; }
         }
     }
 

@@ -353,6 +353,9 @@ function explode(cx, cy, cz, isMega = false, customRadius = null, bombKind = nul
     else if (bombKind === 'nuke') radius = nukePower;
     else radius = isMega ? 8 : 4;
 
+    // AI兵（陣営戦のボクセル兵）を巻き込んだら倒す＝プレイヤーがミサイル/核/TNTで掃討できる。
+    if (typeof killAgentsInRadius === 'function') killAgentsInRadius(cx, cy, cz, radius);
+
     const particleCount = isBomb ? (bombKind === 'tsar' ? 320 : (bombKind === 'hbomb' ? 220 : 140)) : (isMega ? 60 : 30);
     const particleSize = isBomb ? (bombKind === 'tsar' ? 1.1 : 0.9) : (isMega ? 0.6 : 0.4);
     const particleType = bombKind === 'tsar' ? BLOCKS.TSAR : (bombKind === 'hbomb' ? BLOCKS.HBOMB : ((bombKind === 'nuke' || bombKind === 'penetrator') ? BLOCKS.NUKE : (isMega ? BLOCKS.MEGA_TNT : BLOCKS.TNT)));

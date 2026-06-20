@@ -317,6 +317,26 @@
                 finally { camera.position.copy(camSave); camera.updateMatrixWorld(true); }
             });
 
+            // 11g) プレイヤーの爆発（ミサイル/核/TNT）で兵が倒せる＝killAgentsInRadius が explode から効く
+            run(results, 'player explosion kills agents', () => {
+                const evLen = explosionEvents.length;
+                const camSave = camera.position.clone();
+                try {
+                    clearAgents();
+                    const X = T + 720, Z = T + 720;
+                    genArea(X, Z, 2);
+                    const ey = Math.max(columnTopY(X, Z), SEA_LEVEL);
+                    camera.position.set(X, ey + 2, Z);          // 兵はカメラ周囲(半径16〜28)に湧く
+                    const before = summonLegion();
+                    explode(X, ey + 1, Z, false, 50, 'nuke');    // 半径50＝周囲の兵を全部巻き込む
+                    updateAgents(0.05);                          // 死亡(alive=false)を除去
+                    const after = agents.length;
+                    clearAgents();
+                    return { ok: before > 0 && after < before, detail: { before: before, after: after, killed: before - after } };
+                } catch (e) { clearAgents(); return { ok: false, detail: 'ERR ' + (e && e.message) }; }
+                finally { explosionEvents.length = evLen; camera.position.copy(camSave); camera.updateMatrixWorld(true); }
+            });
+
             // 12) スポーンが固体地面の上（水中/空中でない）
             run(results, 'spawn on solid ground', () => {
                 spawnPlayer();
