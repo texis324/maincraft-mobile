@@ -363,8 +363,10 @@ function explode(cx, cy, cz, isMega = false, customRadius = null, bombKind = nul
     const chainForce = bombKind ? 40 : (isMega ? 30 : 20);
     const x0 = Math.floor(cx - R), x1 = Math.ceil(cx + R);
     const y0 = Math.max(bottomY, Math.floor(cy - R));
-    // Y上限は地表（または爆心）の少し上まで。広大な空中セルを総当たりしない＝重い爆弾の高速化
-    const y1 = Math.min(Math.ceil(cy + R), Math.max(SURFACE_Y, Math.ceil(cy)) + 8);
+    // Y上限は球の頂点(cy+R)まで＝再生成(applyExplosionEventsToChunk)と完全一致させる。旧版は地表+8で
+    // 打ち切っていたが、城の塔/天守(高さ16-20)を置くと「live は塔の上が残る/reload は消える」不一致に
+    // なる。空中セルは data 直読みで即skip＝コストは僅か（解析的z範囲で内側だけ回るため）。
+    const y1 = Math.ceil(cy + R);
     // 掘削：外接立方体の総当たり(約59万回のinBlast)をやめ、各(x,y)で z 範囲を解析的に算出して
     // 球/お椀の内側だけを回す（約12万回に激減＝最大のボトルネックを除去）。さらにチャンク局所ポインタで
     // data を直書きし、毎ブロックの chunkKey 文字列生成・map 参照・getBlock キャッシュ無効化を排除。
@@ -433,11 +435,9 @@ function explode(cx, cy, cz, isMega = false, customRadius = null, bombKind = nul
     // 原爆/水爆はクレーターを「イベント1件」で永続化（チャンク再生成時に再カーブ＝掘削edit数万が不要）。
     if (isBomb) recordExplosionEvent(cx, cy, cz, R, true);
 
-    // 掘り出した土砂が環状に積もる「縁の盛り上がり(リップ)」を再現（地表核爆発のみ・同じ affected に積む）
-    if (isBomb) buildCraterRim(cx, cy, cz, R, affected);
-
-    // 爆風なぎ倒し: クレーター外周の環状帯で、地表より上の構造物(村/木/建造物)を距離減衰で撤去（live・原爆/水爆のみ）。
-    // 永続は爆発イベントが再生成時に再現（applyExplosionEventsToChunk）。ここは即時の見た目用。
+    // 爆風なぎ倒し: クレーター縁[R]〜2Rの環状帯で、地表より上の構造物(村/木/城)を撤去（live・原爆/水爆のみ）。
+    // ★リップ(buildCraterRim)より先に走らせる: FLATTEN_R0=1.0 でリングがリップ領域[0.95R,1.35R]と重なるため、
+    //   リップを後で積めばなぎ倒しに消されない。永続は爆発イベントが再生成時に再現（applyExplosionEventsToChunk）。
     if (isBomb) {
         const fr1 = R * FLATTEN_R1, fr02 = (R * FLATTEN_R0) ** 2, fr12 = fr1 * fr1;
         const fx0 = Math.floor(cx - fr1), fx1 = Math.ceil(cx + fr1);
@@ -448,7 +448,7 @@ function explode(cx, cy, cz, isMega = false, customRadius = null, bombKind = nul
                 const dz = z - cz, r2 = dx2 + dz * dz;
                 if (r2 < fr02 || r2 > fr12) continue;
                 const surf = terrainHeightAt(x, z);
-                // surf+1..surf+h を走査して固体を撤去（中空の家の屋根も漏らさない＝再生成側と同一ロジック）。
+                // surf+1..surf+h を走査して固体を撤去（中空の家の屋根/城の塔も漏らさない＝再生成側と同一ロジック）。
                 const yhi = surf + blastFlattenHeight(Math.sqrt(r2), R);
                 for (let y = surf + 1; y <= yhi; y++) {
                     const t = getBlock(x, y, z);
@@ -463,6 +463,9 @@ function explode(cx, cy, cz, isMega = false, customRadius = null, bombKind = nul
         }
         _invalidateGetCache();
     }
+
+    // 掘り出した土砂が環状に積もる「縁の盛り上がり(リップ)」を再現（地表核爆発のみ・なぎ倒しの後＝消されない）
+    if (isBomb) buildCraterRim(cx, cy, cz, R, affected);
 
     // 影響チャンク＋近傍をまとめて dirty 化。無予算 flush はしない＝animate が数フレームで消化して
     // フリーズを回避（クレーターは爆発演出=フラッシュ/画面揺れの間に数フレームで完成する）。

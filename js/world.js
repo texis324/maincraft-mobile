@@ -32,14 +32,15 @@ function recordExplosionEvent(cx, cy, cz, R, isBomb) {
 }
 // 1チャンクに、重なる全爆発イベントを再カーブで適用（generateChunk から block-edit より前に呼ぶ）。
 // explode の掘削と同じ「下半分=お椀/それ以外=真球」「岩盤は残す」を局所インデックスで再現。
-// 爆風なぎ倒しの「地表より上を撤去する高さ」。クレーター外周の環状帯[1.35R,2.0R]で内端→外端に減衰。
-// live と再生成で同じ式＝リロードしても同じ倒れ方になる（決定的）。
-const FLATTEN_R0 = 1.35, FLATTEN_R1 = 2.0;
+// 爆風なぎ倒しの「地表より上を撤去する高さ」。クレーター縁[R]〜2Rの環状帯で構造物（村/木/城）を倒す。
+// リング全域をフル撤去（FLATTEN_CEIL）＝塔/天守も根こそぎで宙吊りを残さない（テーパーにすると狙いを外した時
+// 外縁の高い塔の天井が浮く＝それを根絶）。爆発半径内は総薙ぎ払い＝核としても自然。地形(terrainHeightAt)より
+// 上だけ消すので自然の起伏は削らない。live と再生成で完全に同じ式＝リロードしても同じ倒れ方（決定的・全ボクセル一致）。
+const FLATTEN_R0 = 1.0, FLATTEN_R1 = 2.0;
+const FLATTEN_CEIL = 28;   // 地表より上をこの高さまで撤去（城の天守20/塔16も根こそぎ＝宙吊り防止）
 function blastFlattenHeight(r, R) {
-    const fr0 = R * FLATTEN_R0, fr1 = R * FLATTEN_R1;
-    if (r < fr0 || r > fr1) return 0;
-    const tt = 1 - (r - fr0) / (fr1 - fr0);          // 内端1→外端0
-    return Math.max(1, Math.round(Math.min(16, R * 0.3) * tt));
+    if (r < R * FLATTEN_R0 || r > R * FLATTEN_R1) return 0;
+    return FLATTEN_CEIL;
 }
 
 function applyExplosionEventsToChunk(ch) {
@@ -353,6 +354,7 @@ function clearWorld() {
         delete chunks[ck];
     }
     for (const k in editsByChunk) delete editsByChunk[k];
+    for (const k in _castleCache) delete _castleCache[k];
     explosionEvents.length = 0;
     dirtyChunks.clear();
     _invalidateGetCache();
@@ -533,6 +535,7 @@ function houseZone(x, z) { return (x >= 3 && x <= 11 && z >= 3 && z <= 11); }
 function treeAt(wx, wz) {
     if (houseZone(wx, wz)) return false;
     if (villageMask(wx, wz) >= VILLAGE_THRESHOLD) return false; // 村ゾーンには木を生やさない（家と干渉防止）
+    if (castleCoveringColumn(wx, wz)) return false;             // 城の敷地には木を生やさない
     const h = terrainHeightAt(wx, wz);
     if (h < SEA_LEVEL + 1) return false;
     if (strataBlockAt(wx, h, wz, h) !== BLOCKS.GRASS) return false;
@@ -576,6 +579,7 @@ function villageMask(x, z) { return fbm2(x * 0.006 + 555, z * 0.006 + 555, world
 // (ax,az) に家を建てるか。建てるなら {gy,wallH} を返す。すべて決定的。
 function houseAt(ax, az) {
     if (villageMask(ax, az) < VILLAGE_THRESHOLD) return null;
+    if (castleCoveringColumn(ax, az)) return null;                      // 城の敷地には村の家を建てない
     if (wnHash(ax, 222, az, worldSeed + 71) > 0.72) return null;        // 村ゾーン内でも一部は空き地(通路/広場)
     const gy = terrainHeightAt(ax, az);
     if (gy < SEA_LEVEL + 1) return null;                                // 水辺は除外
@@ -626,6 +630,166 @@ function placeVillagesInChunk(ch) {
     }
 }
 
+// --- 城/要塞（破壊しがいのある巨大建造物）。領域決定的に1城配置（ravine と同じ方式）。
+//     外周の石壁(銃眼つき)＋四隅の塔＋中央の天守＋門。敷地は基礎で平らに均す（緩い起伏OK）。
+//     placeCastlesInChunk が自チャンクに重なる分だけ stamp＝生成順非依存・無限ワールド対応。
+const CASTLE_REGION = 192;          // 城の区画（希少＝まばらに散る。小さいほど密）
+const CASTLE_REGION_PROB = 0.55;    // 区画あたりの城の出現確率
+const CASTLE_HALF = 16;             // 外壁の中心からの距離（壁は 33x33）
+const CASTLE_PAD = 3;               // 敷地余白（木/村の排除＆整地リング）
+const CASTLE_WALL_H = 7;            // 外壁の高さ
+const CASTLE_TOWER_H = 16;          // 四隅の塔の高さ
+const CASTLE_TOWER_HALF = 2;        // 塔の半径（5x5）
+const CASTLE_KEEP_H = 20;           // 中央の天守の高さ
+const CASTLE_KEEP_HALF = 5;         // 天守の半径（11x11）
+const _castleCache = {};            // "rgx,rgz" -> castle|null
+
+// 区画(rgx,rgz)の城を決定的に返す（無ければ null）。区画内で平らな草地を数か所試す。
+function castleForRegion(rgx, rgz) {
+    const rk = rgx + ',' + rgz;
+    if (rk in _castleCache) return _castleCache[rk];
+    const rng = mulberry32((wnHash(rgx, 555, rgz, worldSeed ^ 0x5bd1e995) * 4294967296) >>> 0);
+    let result = null;
+    if (rng() <= CASTLE_REGION_PROB) {
+        for (let attempt = 0; attempt < 6 && !result; attempt++) {
+            const ax = Math.round(rgx * CASTLE_REGION + CASTLE_REGION * (0.22 + rng() * 0.56));
+            const az = Math.round(rgz * CASTLE_REGION + CASTLE_REGION * (0.22 + rng() * 0.56));
+            const gy = terrainHeightAt(ax, az);
+            if (gy < SEA_LEVEL + 2) continue;                  // 水際/海は避ける
+            let mn = gy, mx = gy, ok = true;                   // footprint の起伏（基礎で均せる範囲か）
+            for (let s = 0; s < 9 && ok; s++) {
+                const sx = ax + ((s % 3) - 1) * CASTLE_HALF;
+                const sz = az + (((s / 3) | 0) - 1) * CASTLE_HALF;
+                const h = terrainHeightAt(sx, sz);
+                if (h < SEA_LEVEL) ok = false;                 // 角が水没＝海際は避ける
+                if (h < mn) mn = h; if (h > mx) mx = h;
+            }
+            if (!ok || mx - mn > 10) continue;                 // 起伏が激しすぎる所は避ける
+            result = { ax: ax, az: az, gy: gy, half: CASTLE_HALF, seed: ((ax * 73856093) ^ (az * 19349663)) >>> 0 };
+        }
+    }
+    _castleCache[rk] = result;
+    return result;
+}
+
+// (x,z) を覆う城を返す（無ければ null）。近傍 3x3 区画を見る（footprint < region なので十分）。
+function castleCoveringColumn(x, z) {
+    const crgx = Math.floor(x / CASTLE_REGION), crgz = Math.floor(z / CASTLE_REGION);
+    for (let rgx = crgx - 1; rgx <= crgx + 1; rgx++) {
+        for (let rgz = crgz - 1; rgz <= crgz + 1; rgz++) {
+            const c = castleForRegion(rgx, rgz);
+            if (!c) continue;
+            const ex = c.half + CASTLE_PAD;
+            if (x >= c.ax - ex && x <= c.ax + ex && z >= c.az - ex && z <= c.az + ex) return c;
+        }
+    }
+    return null;
+}
+
+// 城 c をチャンク ch（[bx0..bx1]等）に stamp。整地（基礎/カット）→ 床 → 外壁(銃眼/門) → 四隅の塔 → 天守。
+// すべて決定的（worldSeed＋位置）＝live/再生成で完全一致。set() はチャンク外を自動で捨てる。
+function stampCastleInChunk(c, ch, bx0, by0, bz0, bx1, by1, bz1) {
+    const ax = c.ax, az = c.az, gy = c.gy, H = c.half;
+    const x0 = Math.max(bx0, ax - H), x1 = Math.min(bx1, ax + H);
+    const z0 = Math.max(bz0, az - H), z1 = Math.min(bz1, az + H);
+    if (x0 > x1 || z0 > z1) return;
+    const data = ch.data;
+    const set = (x, y, z, t) => {
+        if (x < bx0 || x > bx1 || y < by0 || y > by1 || z < bz0 || z > bz1) return;
+        data[((y - by0) * CS + (z - bz0)) * CS + (x - bx0)] = t;
+    };
+    const gateSide = (c.seed >> 3) & 3;                  // 0:-x 1:+x 2:-z 3:+z（門/天守扉の向き）
+    const wallTop = gy + CASTLE_WALL_H;
+    for (let x = x0; x <= x1; x++) {
+        const dx = x - ax, adx = Math.abs(dx);
+        for (let z = z0; z <= z1; z++) {
+            const dz = z - az, adz = Math.abs(dz);
+            const natural = terrainHeightAt(x, z);
+            // 整地: 地表を gy に均す（低ければ石で埋め、高ければ削る）
+            for (let y = natural + 1; y <= gy; y++) set(x, y, z, BLOCKS.STONE);  // 基礎
+            for (let y = gy + 1; y <= natural; y++) set(x, y, z, 0);             // 上の土を削る
+            set(x, gy, z, BLOCKS.STONE);                                          // 中庭/敷地の床（石畳）
+
+            // --- 中央の天守（11x11・中空・銃眼・扉） ---
+            if (adx <= CASTLE_KEEP_HALF && adz <= CASTLE_KEEP_HALF) {
+                const onKeepEdge = (adx === CASTLE_KEEP_HALF || adz === CASTLE_KEEP_HALF);
+                if (onKeepEdge) {
+                    let doorGap = false;                                          // 門の向きに合わせた扉（下3マス）
+                    if (gateSide === 0 && dx === -CASTLE_KEEP_HALF && dz === 0) doorGap = true;
+                    else if (gateSide === 1 && dx === CASTLE_KEEP_HALF && dz === 0) doorGap = true;
+                    else if (gateSide === 2 && dz === -CASTLE_KEEP_HALF && dx === 0) doorGap = true;
+                    else if (gateSide === 3 && dz === CASTLE_KEEP_HALF && dx === 0) doorGap = true;
+                    for (let y = gy + 1; y <= gy + CASTLE_KEEP_H; y++) {
+                        if (doorGap && y <= gy + 3) continue;
+                        set(x, y, z, BLOCKS.STONE);
+                    }
+                    if (((x + z) & 1) === 0) set(x, gy + CASTLE_KEEP_H + 1, z, BLOCKS.STONE); // 銃眼
+                }
+                continue;                                                          // 天守の内側は中庭（床のみ）
+            }
+
+            // --- 四隅の塔（5x5・中空・銃眼・天守より高い視覚アクセント） ---
+            const tcx = dx < 0 ? -H : H, tcz = dz < 0 ? -H : H;                   // 最寄りの隅
+            const tdx = Math.abs(dx - tcx), tdz = Math.abs(dz - tcz);
+            if (tdx <= CASTLE_TOWER_HALF && tdz <= CASTLE_TOWER_HALF) {
+                const onTowerEdge = (tdx === CASTLE_TOWER_HALF || tdz === CASTLE_TOWER_HALF);
+                if (onTowerEdge) {
+                    for (let y = gy + 1; y <= gy + CASTLE_TOWER_H; y++) set(x, y, z, BLOCKS.STONE);
+                    if (((x + z) & 1) === 0) set(x, gy + CASTLE_TOWER_H + 1, z, BLOCKS.STONE); // 銃眼
+                }
+                continue;                                                          // 塔の内側は中空（床のみ）
+            }
+
+            // --- 外周の城壁（銃眼つき・1辺に門） ---
+            if (adx === H || adz === H) {
+                let gateGap = false;                                              // 門（選ばれた辺の中央・幅3・高4）
+                if (gateSide === 0 && dx === -H && Math.abs(dz) <= 1) gateGap = true;
+                else if (gateSide === 1 && dx === H && Math.abs(dz) <= 1) gateGap = true;
+                else if (gateSide === 2 && dz === -H && Math.abs(dx) <= 1) gateGap = true;
+                else if (gateSide === 3 && dz === H && Math.abs(dx) <= 1) gateGap = true;
+                for (let y = gy + 1; y <= wallTop; y++) {
+                    if (gateGap && y <= gy + 4) continue;
+                    set(x, y, z, BLOCKS.STONE);
+                }
+                if (((x + z) & 1) === 0) set(x, wallTop + 1, z, BLOCKS.STONE);     // 銃眼（凹凸）
+            }
+        }
+    }
+}
+
+// チャンク ch に重なる城を stamp（近傍 3x3 区画）。村より後・木より前に呼ぶ（敷地に木を生やさない）。
+function placeCastlesInChunk(ch) {
+    const bx0 = ch.cx * CS, by0 = ch.cy * CS, bz0 = ch.cz * CS;
+    const bx1 = bx0 + CS - 1, by1 = by0 + CS - 1, bz1 = bz0 + CS - 1;
+    const ccrgx = Math.floor((bx0 + (CS >> 1)) / CASTLE_REGION);
+    const ccrgz = Math.floor((bz0 + (CS >> 1)) / CASTLE_REGION);
+    for (let rgx = ccrgx - 1; rgx <= ccrgx + 1; rgx++) {
+        for (let rgz = ccrgz - 1; rgz <= ccrgz + 1; rgz++) {
+            const c = castleForRegion(rgx, rgz);
+            if (!c) continue;
+            if (c.ax + c.half < bx0 || c.ax - c.half > bx1 || c.az + c.half < bz0 || c.az - c.half > bz1) continue;
+            stampCastleInChunk(c, ch, bx0, by0, bz0, bx1, by1, bz1);
+        }
+    }
+}
+
+// 近傍で一番近い城を探す（テスト/将来のナビ用・なければ null）。
+function findCastleNear(x, z, chunkRadius) {
+    const rad = chunkRadius || 12;
+    const crgx = Math.floor(x / CASTLE_REGION), crgz = Math.floor(z / CASTLE_REGION);
+    const span = Math.ceil((rad * CS) / CASTLE_REGION) + 1;
+    let best = null, bestD = Infinity;
+    for (let rgx = crgx - span; rgx <= crgx + span; rgx++) {
+        for (let rgz = crgz - span; rgz <= crgz + span; rgz++) {
+            const c = castleForRegion(rgx, rgz);
+            if (!c) continue;
+            const d = (c.ax - x) * (c.ax - x) + (c.az - z) * (c.az - z);
+            if (d < bestD) { bestD = d; best = c; }
+        }
+    }
+    return best;
+}
+
 // このチャンクの edit を再適用（プレイヤー改変/家の永続）。自チャンク分だけ見る＝高速。
 function applyEditsToChunk(ch) {
     const e = editsByChunk[chunkKey(ch.cx, ch.cy, ch.cz)];
@@ -659,6 +823,7 @@ function generateChunk(ch) {
     }
     carveRavinesInChunk(ch);
     placeVillagesInChunk(ch);        // 村（家）。木より前＝村ゾーンに木を生やさない
+    placeCastlesInChunk(ch);         // 城/要塞。村の後・木の前＝敷地に村の家/木を生やさない
     placeTreesInChunk(ch);
     applyExplosionEventsToChunk(ch); // 爆発イベントを再カーブ（block-edit より前＝後から建てた物が上書きで残る）
     applyEditsToChunk(ch);
@@ -789,6 +954,13 @@ function _streamUnload(pcx, pcy, pcz) {
     for (const rk in _ravineCache) {
         const c = rk.indexOf(',');
         if (Math.abs(+rk.slice(0, c) - prgx) > rfar || Math.abs(+rk.slice(c + 1) - prgz) > rfar) delete _ravineCache[rk];
+    }
+    // 城キャッシュの遠方区画も刈る（無限探索でのメモリリーク防止）
+    const cfar = Math.ceil((far * CS) / CASTLE_REGION) + 2;
+    const pcgx = Math.floor((pcx * CS) / CASTLE_REGION), pcgz = Math.floor((pcz * CS) / CASTLE_REGION);
+    for (const rk in _castleCache) {
+        const c = rk.indexOf(',');
+        if (Math.abs(+rk.slice(0, c) - pcgx) > cfar || Math.abs(+rk.slice(c + 1) - pcgz) > cfar) delete _castleCache[rk];
     }
 }
 

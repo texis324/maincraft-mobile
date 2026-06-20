@@ -121,10 +121,10 @@
             run(results, 'far blast carves on later gen', () => {
                 const X = T + 6000, Z = T + 6000;
                 const loadedBefore = !!chunks[chunkOf(X, terrainHeightAt(X, Z), Z)];
-                const ey = Math.max(terrainHeightAt(X, Z), SEA_LEVEL);
+                const ey = terrainHeightAt(X, Z);   // 地表（固体）で起爆＝水没列でも確実に固体を掘る（seed非依存）
                 explode(X, ey, Z, false, 6);
                 genCol(X, Z);
-                return { ok: !loadedBefore && getBlock(X, ey, Z) === 0, detail: { loadedBefore: loadedBefore } };
+                return { ok: !loadedBefore && getBlock(X, ey, Z) === 0, detail: { loadedBefore: loadedBefore, surf: ey } };
             });
 
             // 9) edit がチャンクのアンロード→再生成を跨いで保持
@@ -158,6 +158,52 @@
                     for (let s = 0; s < rav.path.length; s++) maxD = Math.max(maxD, rav.path[s].centerSurf - rav.path[s].botY);
                 }
                 return { ok: maxD >= 30, detail: maxD };
+            });
+
+            // 11b) 城が生成される（近傍に石壁が地表より上に立つ）
+            run(results, 'castle generates', () => {
+                const c = findCastleNear(T + 30000, T + 30000, 120);
+                if (!c) return { ok: false, detail: 'no castle found' };
+                genArea(c.ax, c.az, 4);
+                // 外壁の1点（+x辺の中央付近）に地表より上の石があるか
+                const wx = c.ax + c.half, wz = c.az;
+                const above = getBlock(wx, c.gy + 2, wz);
+                const floor = getBlock(c.ax, c.gy, c.az);
+                return { ok: above === BLOCKS.STONE && floor === BLOCKS.STONE, detail: { at: [c.ax, c.gy, c.az], wall: above, floor: floor } };
+            });
+
+            // 11c) 城を核攻撃 → live と「アンロード→再生成」が全ボクセル一致（高い塔/天守の不一致＝トラップ回帰検出）
+            run(results, 'castle nuke live==reload (all voxels)', () => {
+                const evLen = explosionEvents.length;
+                try {
+                    const c = findCastleNear(T + 30000, T + 30000, 120);
+                    if (!c) return { ok: false, detail: 'no castle' };
+                    const X = c.ax, Z = c.az, gy = c.gy;
+                    genArea(X, Z, 5);
+                    explode(X, Math.max(gy, SEA_LEVEL) + 1, Z, false, 30, 'nuke'); // 城直撃の原爆
+                    flushDirtyChunks();
+                    const RX = 60, Y0 = gy - 32, Y1 = gy + 30, ny = Y1 - Y0 + 1, nxz = RX * 2 + 1;
+                    const snap = () => {
+                        const a = new Uint8Array(nxz * nxz * ny); let i = 0;
+                        for (let x = X - RX; x <= X + RX; x++)
+                            for (let z = Z - RX; z <= Z + RX; z++)
+                                for (let y = Y0; y <= Y1; y++) a[i++] = getBlock(x, y, z);
+                        return a;
+                    };
+                    const live = snap();
+                    const cx0 = Math.floor((X - RX) / 16), cx1 = Math.floor((X + RX) / 16);
+                    const cz0 = Math.floor((Z - RX) / 16), cz1 = Math.floor((Z + RX) / 16);
+                    const cy0 = Math.floor(Y0 / 16), cy1 = Math.floor(Y1 / 16);
+                    for (let cx = cx0; cx <= cx1; cx++) for (let cy = cy0; cy <= cy1; cy++) for (let cz = cz0; cz <= cz1; cz++) unloadChunk(chunkKey(cx, cy, cz));
+                    for (let cx = cx0; cx <= cx1; cx++) for (let cy = cy0; cy <= cy1; cy++) for (let cz = cz0; cz <= cz1; cz++) ensureChunk(cx, cy, cz);
+                    flushDirtyChunks();
+                    const reload = snap();
+                    let diff = 0, firstAt = -1;
+                    for (let k = 0; k < live.length; k++) if (live[k] !== reload[k]) { diff++; if (firstAt < 0) firstAt = k; }
+                    return { ok: diff === 0, detail: { castle: [X, gy, Z], cells: live.length, diff: diff, firstAt: firstAt } };
+                } finally {
+                    explosionEvents.length = evLen; // テストの爆発イベントをワールドに残さない
+                }
             });
 
             // 12) スポーンが固体地面の上（水中/空中でない）
