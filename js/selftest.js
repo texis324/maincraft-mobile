@@ -296,23 +296,26 @@
                 finally { camera.position.copy(camSave); camera.updateMatrixWorld(true); }
             });
 
-            // 11f) AI陣営戦: 隣接した赤×青を白兵戦させ、HPが減る／撃破される（近接戦闘＋HPが機能）
-            run(results, 'AI faction melee combat', () => {
+            // 11f) AI陣営戦: 離れた赤×青が銃で撃ち合い、HPが減る／撃破される＋曳光弾(tracer)が出る
+            run(results, 'AI faction ranged combat', () => {
                 const camSave = camera.position.clone();
                 try {
                     clearAgents();
                     const X = T + 600, Z = T + 600;
-                    genArea(X, Z, 1);
-                    const gy = Math.max(columnTopY(X, Z), SEA_LEVEL);
-                    camera.position.set(X, gy + 3, Z);
-                    agents.push(_makeAgent(X, gy + 1, Z, 0));        // 赤
-                    agents.push(_makeAgent(X + 1, gy + 1, Z, 1));    // 青（1ブロック隣＝即engaged）
-                    for (let s = 0; s < 60; s++) updateAgents(0.05); // 3秒ぶん戦わせる
+                    // 平らな石の足場を作って撃ち合わせる（自然地形の起伏で埋まる/LOSが通らないのを排除）。
+                    // setBlockData は edit を記録せず・チャンクは自動生成・getBlock は data 読みなのでmesh不要。
+                    const baseY = Math.max(terrainHeightAt(X, Z), SEA_LEVEL) + 4;
+                    for (let dx = -10; dx <= 10; dx++) for (let dz = -2; dz <= 2; dz++) setBlockData(X + dx, baseY, Z + dz, BLOCKS.STONE);
+                    camera.position.set(X, baseY + 3, Z);
+                    agents.push(_makeAgent(X - 6, baseY + 1, Z, 0));    // 赤（射程内・足場上でLOSクリア）
+                    agents.push(_makeAgent(X + 6, baseY + 1, Z, 1));    // 青
+                    let firedFrames = 0;
+                    for (let s = 0; s < 120; s++) { updateAgents(0.05); if (tracers.length > 0) firedFrames++; } // 6秒撃ち合い
                     const remaining = agents.length;
                     const died = remaining < 2;
                     const hurt = agents.some(a => a.hp < AGENT_HP);
                     clearAgents();
-                    return { ok: died || hurt, detail: { remaining: remaining, died: died, hurt: hurt } };
+                    return { ok: (died || hurt) && firedFrames > 0, detail: { remaining: remaining, died: died, hurt: hurt, firedFrames: firedFrames } };
                 } catch (e) { clearAgents(); return { ok: false, detail: 'ERR ' + (e && e.message) }; }
                 finally { camera.position.copy(camSave); camera.updateMatrixWorld(true); }
             });
