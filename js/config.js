@@ -77,11 +77,12 @@ const BLOCKS = {
     DEEPSLATE: 18,  // 深層岩（最深部・硬い）
     TSAR: 20,           // ツァーリ・ボンバ（史上最大の核・設置→火打石で着火・閃光→暗転）
     MISSILE_BUTTON: 103, // ミサイル発射ボタン（右クリで核ミサイル5発を横一列に斉射）
-    PENETRATOR: 104     // 地中貫通核（右クリで発射→着弾後に地中へ潜って起爆＝地下空洞＋陥没）
+    PENETRATOR: 104,    // 地中貫通核（右クリで発射→着弾後に地中へ潜って起爆＝地下空洞＋陥没）
+    SUMMONER: 105       // AI破壊軍団の召喚（右クリでボクセル兵の群れを召喚＝世界をカオスに破壊）
 };
 
 // Initial Inventory Order
-let INVENTORY = [BLOCKS.GRASS, BLOCKS.STONE, BLOCKS.WOOD, BLOCKS.LEAVES, BLOCKS.TNT, BLOCKS.MEGA_TNT, BLOCKS.NUKE, BLOCKS.HBOMB, BLOCKS.TSAR, BLOCKS.FLINT, BLOCKS.WATER, BLOCKS.TNT_LAUNCHER, BLOCKS.ROCKET_LAUNCHER, BLOCKS.NUKE_MISSILE, BLOCKS.MIRV_MISSILE, BLOCKS.MISSILE_BUTTON, BLOCKS.PENETRATOR];
+let INVENTORY = [BLOCKS.GRASS, BLOCKS.STONE, BLOCKS.WOOD, BLOCKS.LEAVES, BLOCKS.TNT, BLOCKS.MEGA_TNT, BLOCKS.NUKE, BLOCKS.HBOMB, BLOCKS.TSAR, BLOCKS.FLINT, BLOCKS.WATER, BLOCKS.TNT_LAUNCHER, BLOCKS.ROCKET_LAUNCHER, BLOCKS.NUKE_MISSILE, BLOCKS.MIRV_MISSILE, BLOCKS.MISSILE_BUTTON, BLOCKS.PENETRATOR, BLOCKS.SUMMONER];
 let selectedItemIndex = 0;
 let swapSourceIndex = -1;
 
@@ -119,6 +120,7 @@ const BLOCK_PROPS = {
     [BLOCKS.TSAR]: { color: 0xFF6F00, sound: 'soft' }, // ツァーリ・ボンバ（橙×黒ハザード）
     [BLOCKS.MISSILE_BUTTON]: { isTool: true }, // 発射ボタン（設置不可・右クリで斉射）
     [BLOCKS.PENETRATOR]: { isTool: true, color: 0x546E7A }, // 地中貫通核（設置不可・右クリで発射）
+    [BLOCKS.SUMMONER]: { isTool: true }, // AI破壊軍団の召喚（設置不可・右クリで召喚）
     [BLOCKS.WATER]: { color: 0x2196F3, sound: 'water', transparent: true, opacity: 0.6, noCollide: true },
     [BLOCKS.BEDROCK]: { color: 0x000000, sound: 'hard' },
     [BLOCKS.FLINT]: { isTool: true },

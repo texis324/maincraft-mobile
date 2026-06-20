@@ -350,6 +350,7 @@ function carveUnloaded(x, y, z) {
 
 // 世界を空にする（再生成用。共有マテリアル/アトラスは破棄しない）
 function clearWorld() {
+    if (typeof clearAgents === 'function') clearAgents(); // AI軍団も消す（agents.js・読み込み順で未定義の可能性に備えguard）
     for (const ck in chunks) {
         const ch = chunks[ck];
         if (ch.solid) { scene.remove(ch.solid); ch.solid.geometry.dispose(); }

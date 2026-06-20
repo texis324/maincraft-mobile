@@ -235,6 +235,24 @@
                 } finally { explosionEvents.length = evLen; }
             });
 
+            // 11e) AI破壊軍団: 召喚→updateAgentsを手動stepして例外なく動く＋InstancedMesh countが一致
+            run(results, 'AI legion summon+update', () => {
+                const camSave = camera.position.clone();
+                try {
+                    clearAgents();
+                    const X = T + 540, Z = T + 540;
+                    const sy = Math.max(terrainHeightAt(X, Z), SEA_LEVEL) + 2;
+                    camera.position.set(X, sy, Z);
+                    genArea(X, Z, 2);
+                    const n = summonLegion();
+                    for (let s = 0; s < 12; s++) updateAgents(0.05); // 物理を決定的に手動step（例外が出ないこと）
+                    const ok = n > 0 && agents.length > 0 && !!agentMesh && agentMesh.count === Math.min(agents.length, AGENT_MAX);
+                    clearAgents();
+                    return { ok: ok, detail: { spawned: n, alive: agents.length, meshCount: agentMesh ? agentMesh.count : -1 } };
+                } catch (e) { clearAgents(); return { ok: false, detail: 'ERR ' + (e && e.message) }; }
+                finally { camera.position.copy(camSave); camera.updateMatrixWorld(true); }
+            });
+
             // 12) スポーンが固体地面の上（水中/空中でない）
             run(results, 'spawn on solid ground', () => {
                 spawnPlayer();

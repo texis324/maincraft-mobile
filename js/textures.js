@@ -202,6 +202,16 @@ function paintTile(ctx, type) {
         ctx.fillStyle = '#FFC107'; ctx.fillRect(24,16,16,4);          // 黄帯
         ctx.fillStyle = '#FF3D00';                                    // 下向き矢印（貫通の意）
         ctx.beginPath(); ctx.moveTo(10,28); ctx.lineTo(18,28); ctx.lineTo(18,40); ctx.lineTo(22,40); ctx.lineTo(14,52); ctx.lineTo(6,40); ctx.lineTo(10,40); ctx.closePath(); ctx.fill();
+    } else if (type === 'summoner') {
+        // AI破壊軍団の召喚（紫の召喚陣＋赤い目のボクセル兵が3体並ぶ）
+        ctx.fillStyle = '#1a0e26'; ctx.fillRect(0,0,64,64);
+        ctx.strokeStyle = '#8e24aa'; ctx.lineWidth = 3;                 // 召喚陣のリング
+        ctx.beginPath(); ctx.arc(32,40,20,0,Math.PI*2); ctx.stroke();
+        ctx.fillStyle = '#ce93d8';                                     // 陣の点
+        for(let k=0;k<6;k++){ const a=k*Math.PI/3; ctx.fillRect(32+Math.cos(a)*20-1,40+Math.sin(a)*20-1,3,3); }
+        const bots=[[16,10],[28,6],[40,10]];                           // 3体のボクセル兵
+        for(const b of bots){ ctx.fillStyle='#2b2f33'; ctx.fillRect(b[0],b[1],10,18);
+            ctx.fillStyle='#ff1744'; ctx.fillRect(b[0]+2,b[1]+4,2,2); ctx.fillRect(b[0]+6,b[1]+4,2,2); }
     }
 }
 
@@ -233,6 +243,7 @@ let nukeMissileTexture;
 let mirvMissileTexture;
 let missileButtonTexture;
 let penetratorTexture;
+let summonerTexture;
 
 function initMaterials() {
     const grassTop = createTexture('grass_top');
@@ -261,6 +272,7 @@ function initMaterials() {
     const tsarTop = createTexture('tsar_top');
     missileButtonTexture = createTexture('missile_button');
     penetratorTexture = createTexture('penetrator');
+    summonerTexture = createTexture('summoner');
 
     materials[BLOCKS.GRASS] = [
         new THREE.MeshLambertMaterial({ map: grassSide }),

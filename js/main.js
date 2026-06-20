@@ -109,6 +109,7 @@ function animate() {
     updatePrimedTNTs(delta); // Update Physics TNT
     updateRockets(delta); // Update Rockets
     updateNukeMissiles(delta); // 核ミサイル（単弾頭/MIRV）の飛行・分裂・着弾を更新
+    updateAgents(delta); // AI破壊軍団の移動・破壊（InstancedMesh・ラウンドロビン思考・遅延メッシュ）
     updateGunAnimation(delta); // 銃のアニメーション更新
 
     // Physics & Movement

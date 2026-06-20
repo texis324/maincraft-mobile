@@ -133,6 +133,12 @@ function attemptPlaceOrIgnite(screenX, screenY) {
         return;
     }
 
+    // AI破壊軍団の召喚: ボクセル兵の群れを周囲に召喚（世界をカオスに破壊）
+    if (currentItem === BLOCKS.SUMMONER) {
+        summonLegion();
+        return;
+    }
+
     const hit = pickBlock(screenX, screenY);
 
     if (hit) {
