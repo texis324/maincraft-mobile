@@ -1,22 +1,17 @@
-// --- AI破壊軍団（destruction legion）＋陣営戦（赤軍 vs 青軍） ---
-// 「召喚すると赤軍と青軍が左右から湧いて会戦＝近接で殴り合い、勝った側はそのまま世界を破壊する」。
+// --- AI 陣営戦（赤軍 vs 青軍） ---
+// 「召喚すると赤軍と青軍が左右から湧いて会戦＝近接で殴り合う」。地形は壊さない（侵食なし＝シンプルに戦うだけ）。
 // 性能対策が肝（数百体でも軽い）なので以下を徹底:
 //   ① 描画＝THREE.InstancedMesh（全ユニットを1ドローコール）＋ setColorAt で陣営色を per-instance 着色
 //   ② 思考＝ラウンドロビン（1フレームに数体だけ「最寄りの敵を索敵」、残りは惰性で前進）
-//   ③ 破壊＝遅延メッシュ（setBlockData+markDirty で dirty に積むだけ→main.js が予算で flush）。
-//      edit は記録しない＝localStorage 肥大と再生成コストを避ける（破壊はライブ演出・リロードで世界が癒える）
-//   ④ 距離カリング＝ロード済み領域(VIEW_DIST)の外に出たユニットは消滅（落下し続ける無駄を防ぐ）
-// 戦闘は「核なし」＝近接melee のみ（爆発は地形破壊の副産物としてのみ・敵に核は撃たない）。
+//   ③ 距離カリング＝ロード済み領域(VIEW_DIST)の外に出たユニットは消滅（落下し続ける無駄を防ぐ）
+// 戦闘は近接melee のみ（核なし）。地形の掘削/破壊は一切しない（壁は1段差なら登り、それ以上は回り込む）。
 
 const AGENT_MAX = 260;            // 同時生存上限（描画/思考の予算上限）
 const AGENT_WAVE = 28;            // 召喚1回で出す総数（赤14＋青14で会戦になる）
 const AGENT_THINK_BUDGET = 14;    // 1フレームに「索敵」するユニット数（ラウンドロビン）
 const AGENT_SPEED = 4.2;          // 水平移動速度
 const AGENT_GRAVITY = 24.0;
-const AGENT_DIG_CD = 0.32;        // 破壊クールダウン（秒）
 const AGENT_H = 1.7;             // 見た目の高さ
-const AGENT_BLAST_CHANCE = 0.035; // 破壊時に稀に小爆発（チャオス演出・戦闘中の兵は出さない）
-let _agentBlastCD = 0;           // 小爆発のグローバルクールダウン（性能スパイク防止）
 let _agentDeathFxCD = 0;         // 戦死パフの throttle（大量死で破片スパイクを防ぐ）
 
 // --- 陣営戦パラメータ ---
@@ -33,7 +28,7 @@ const _cBlue = new THREE.Color(0.30, 0.55, 1.0);  // 青軍
 const _cWhite = new THREE.Color(1, 1, 1);          // 被弾フラッシュ
 const _cTmp = new THREE.Color();
 
-// 各エージェント: { x,y,z(float世界座標), vy, heading(ラジアン), grounded, digCd, digTarget,
+// 各エージェント: { x,y,z(float世界座標), vy, heading(ラジアン), grounded,
 //                   faction(0=赤/1=青), hp, target(敵エージェント参照|null), atkCd, hitFlash, alive }
 const agents = [];
 let agentMesh = null;            // THREE.InstancedMesh
@@ -72,7 +67,7 @@ function _makeAgent(x, y, z, faction, heading) {
     return {
         x: x, y: y, z: z, vy: 0,
         heading: (heading === undefined) ? Math.random() * Math.PI * 2 : heading,
-        grounded: false, digCd: Math.random() * AGENT_DIG_CD, digTarget: null,
+        grounded: false,
         faction: faction, hp: AGENT_HP, target: null,
         atkCd: Math.random() * AGENT_ATK_CD, hitFlash: 0, alive: true
     };
@@ -111,18 +106,8 @@ function _agentSolid(x, y, z) {
     return t && !(BLOCK_PROPS[t] && BLOCK_PROPS[t].noCollide);
 }
 
-// ライブ破壊（edit を記録しない＝肥大回避）。岩盤/空気/水は壊さない。
-function _agentDestroy(x, y, z) {
-    const t = getBlock(x, y, z);
-    if (!t || t === BLOCKS.BEDROCK || (BLOCK_PROPS[t] && BLOCK_PROPS[t].noCollide)) return false;
-    setBlockData(x, y, z, 0);
-    markDirty(x, y, z);
-    return true;
-}
-
 function updateAgents(delta) {
     if (!agentMesh || agents.length === 0) { if (agentMesh) agentMesh.count = 0; return; }
-    if (_agentBlastCD > 0) _agentBlastCD -= delta;
     if (_agentDeathFxCD > 0) _agentDeathFxCD -= delta;
     const dt = Math.min(delta, 0.05);
     const px = camera.position.x, pz = camera.position.z;
@@ -143,11 +128,11 @@ function updateAgents(delta) {
             if (d < bestD) { bestD = d; best = b; }
         }
         a.target = best;
-        if (!best && Math.random() < 0.5) a.heading += (Math.random() - 0.5) * 1.6; // 敵不在＝ふらつき徘徊（地形破壊モード）
+        if (!best && Math.random() < 0.5) a.heading += (Math.random() - 0.5) * 1.6; // 敵不在＝ふらつき徘徊
     }
     _agentThinkPtr = (_agentThinkPtr + thinkN) % Math.max(1, nThink);
 
-    // ② 移動＋戦闘＋破壊（全エージェント・軽い処理）
+    // ② 移動＋戦闘（全エージェント・軽い処理）
     for (let i = agents.length - 1; i >= 0; i--) {
         const a = agents[i];
         // 戦死 / 距離カリング / 奈落落下で消滅（参照されても無効と分かるよう alive を倒してから splice）
@@ -197,7 +182,7 @@ function updateAgents(delta) {
             }
         }
 
-        // 水平移動（接地時＆非engaged）。壁にぶつかったら段差は登り、壁は破壊対象にする。
+        // 水平移動（接地時＆非engaged）。壁は1段差なら登り、それ以上は向きを散らして回り込む（掘らない＝侵食なし）。
         if (a.grounded && !engaged) {
             const hx = Math.cos(a.heading), hz = Math.sin(a.heading);
             const nx = a.x + hx * AGENT_SPEED * dt;
@@ -205,43 +190,18 @@ function updateAgents(delta) {
             const bx = Math.floor(nx + hx * 0.4), bz = Math.floor(nz + hz * 0.4);
             const fy = Math.floor(a.y);
             if (_agentSolid(bx, fy, bz)) {
-                // 進行先が壁: 1段差なら登る、それ以上なら破壊対象
                 if (!_agentSolid(bx, fy + 1, bz) && !_agentSolid(bx, fy + 2, bz)) {
-                    a.y += 1; a.x = nx; a.z = nz; // ステップアップ
+                    a.y += 1; a.x = nx; a.z = nz; // 1段差は登る
                 } else {
-                    a.digTarget = [bx, fy, bz];
-                    a.heading += (Math.random() - 0.5) * 0.8; // 少し向きを散らす（みんなで同じ壁に詰まらない）
+                    a.heading += (Math.random() - 0.5) * 1.4; // 壁＝向きを散らして回り込む（地形は壊さない）
                 }
             } else {
                 a.x = nx; a.z = nz;
             }
         }
-
-        // ③ 破壊（クールダウン）。engaged（白兵戦中）の兵は地形を掘らない＝戦闘に専念。
-        //    digTarget があればそれを、無ければ進行方向の足元/体の固体を壊す＝常に何か破壊。
-        if (!engaged) {
-            a.digCd -= dt;
-            if (a.digCd <= 0 && a.grounded) {
-                a.digCd = AGENT_DIG_CD;
-                let tx, ty, tz;
-                if (a.digTarget) { tx = a.digTarget[0]; ty = a.digTarget[1]; tz = a.digTarget[2]; a.digTarget = null; }
-                else {
-                    const hx = Math.cos(a.heading), hz = Math.sin(a.heading), fy = Math.floor(a.y);
-                    tx = Math.floor(a.x + hx); ty = fy; tz = Math.floor(a.z + hz);
-                    if (!_agentSolid(tx, ty, tz)) ty = fy - 1; // 前が空なら足元を掘る
-                }
-                if (_agentDestroy(tx, ty, tz)) {
-                    // 小爆発は「敵を追っていない（地形破壊モード）」の兵だけ＝会戦中に爆発で薙ぎ払わない
-                    if (!a.target && _agentBlastCD <= 0 && Math.random() < AGENT_BLAST_CHANCE) {
-                        _agentBlastCD = 0.2; // グローバルCD＝小爆発のスパイク抑制
-                        explode(tx, ty, tz, false, 3);
-                    }
-                }
-            }
-        }
     }
 
-    // ④ インスタンス行列＋陣営色を書き込み（1ドローコール）
+    // ③ インスタンス行列＋陣営色を書き込み（1ドローコール）
     const n = Math.min(agents.length, AGENT_MAX);
     for (let i = 0; i < n; i++) {
         const a = agents[i];

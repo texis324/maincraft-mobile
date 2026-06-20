@@ -801,7 +801,8 @@ function spawnNukeMissile(position, direction, scale, isMirv, canSplit, penetrat
     });
 }
 
-// ミサイル発射ボタン: 核ミサイル5発を横一列に斉射（中距離の地表へ＝きのこ雲群が一望できる）。金正恩風。
+// ミサイル発射ボタン: 核ミサイルが前方一帯の上空から時間差で降ってくる（自分から撃たない・空爆）。
+// 各弾は上空 dropY からほぼ真下へ落下→降下中に地表+H で airburst（単弾頭の既存ロジック）。
 function launchNukeBarrage() {
     const fwd = new THREE.Vector3();
     camera.getWorldDirection(fwd);
@@ -810,19 +811,27 @@ function launchNukeBarrage() {
     fwd.normalize();
     const right = new THREE.Vector3(-fwd.z, 0, fwd.x); // 進行方向の真横
     const base = camera.position.clone();
-    const midDist = 90;                                 // 着弾までの距離（中距離）
-    const offsets = [-48, -24, 0, 24, 48];              // 横一列の間隔
-    for (let i = 0; i < offsets.length; i++) {
-        const tx = base.x + fwd.x * midDist + right.x * offsets[i];
-        const tz = base.z + fwd.z * midDist + right.z * offsets[i];
-        const ty = nukeGroundYBelow(Math.floor(tx), Math.floor(tz), maxSurfaceY + 5); // 着弾点の地表
-        const spawnPos = base.clone()
-            .add(fwd.clone().multiplyScalar(3.2))
-            .add(right.clone().multiplyScalar(offsets[i] * 0.12)); // 発射口を少し横へ散らす
-        const dir = new THREE.Vector3(tx - spawnPos.x, ty - spawnPos.y, tz - spawnPos.z).normalize();
-        spawnNukeMissile(spawnPos, dir, 2.0, false, false, false); // 単弾頭・降下中にairburst
-    }
+    const count = 5;                                    // 降ってくる核の数
+    const midDist = 70;                                 // 着弾帯の前方中心距離
+    const offsets = [-48, -24, 0, 24, 48];              // 横一列の基準（前後にも少し散らす）
     playSound('missile_launch');
+    for (let i = 0; i < count; i++) {
+        // 着弾点＝前方の一帯にばらつかせる（横は基準offset＋ジッタ、前後もジッタ＝絨毯爆撃っぽく）
+        const along = midDist + (Math.random() - 0.5) * 28;
+        const lateral = offsets[i] + (Math.random() - 0.5) * 12;
+        const tx = base.x + fwd.x * along + right.x * lateral;
+        const tz = base.z + fwd.z * along + right.z * lateral;
+        // 微妙に時間差で上空から投下（それぞれズレて降ってくる）
+        setTimeout(() => {
+            const gy = nukeGroundYBelow(Math.floor(tx), Math.floor(tz), maxSurfaceY + 5);
+            const dropY = Math.max(maxSurfaceY, gy) + 72;            // 上空から
+            const spawnPos = new THREE.Vector3(tx + (Math.random() - 0.5) * 6, dropY, tz + (Math.random() - 0.5) * 6);
+            // ほぼ真下（わずかに斜め＝降ってくる弾道感）。velocity.y<0 で降下中 airburst が効く。
+            const dir = new THREE.Vector3((tx - spawnPos.x) * 0.05, -1, (tz - spawnPos.z) * 0.05).normalize();
+            spawnNukeMissile(spawnPos, dir, 2.0, false, false, false); // 単弾頭・降下中に airburst
+            if (typeof playSound === 'function') playSound('whistle'); // 落下の「ヒューーン」
+        }, i * 260 + Math.random() * 120);
+    }
     triggerGunRecoil();
 }
 
