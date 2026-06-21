@@ -12,6 +12,8 @@ function getImageForType(type) {
     else if(type === BLOCKS.SUMMONER) return summonerTexture.image.toDataURL();
     else if(type === BLOCKS.SUMMON_RED) return summonRedTexture.image.toDataURL();
     else if(type === BLOCKS.SUMMON_BLUE) return summonBlueTexture.image.toDataURL();
+    else if(type === BLOCKS.RIFLE) return rifleTexture.image.toDataURL();
+    else if(type === BLOCKS.RAILGUN) return railgunTexture.image.toDataURL();
     else if(type === BLOCKS.WATER) return materials[type].map.image.toDataURL();
     else if(type === BLOCKS.FLINT) return flintTexture.image.toDataURL();
     else if(type === BLOCKS.TNT_LAUNCHER) return launcherTexture.image.toDataURL();
@@ -99,12 +101,10 @@ function handleInventorySwap(index) {
 // 銃の表示を更新
 function updateGunVisibility() {
     const currentItem = INVENTORY[selectedItemIndex];
-    if (typeof gunGroup !== 'undefined') {
-        gunGroup.visible = (currentItem === BLOCKS.TNT_LAUNCHER);
-    }
-    if (typeof rocketGunGroup !== 'undefined') {
-        rocketGunGroup.visible = (currentItem === BLOCKS.ROCKET_LAUNCHER);
-    }
+    if (typeof gunGroup !== 'undefined') gunGroup.visible = (currentItem === BLOCKS.TNT_LAUNCHER);
+    if (typeof rocketGunGroup !== 'undefined') rocketGunGroup.visible = (currentItem === BLOCKS.ROCKET_LAUNCHER);
+    if (typeof rifleGunGroup !== 'undefined') rifleGunGroup.visible = (currentItem === BLOCKS.RIFLE);
+    if (typeof railgunGunGroup !== 'undefined') railgunGunGroup.visible = (currentItem === BLOCKS.RAILGUN);
 }
 
 // 現在アクティブな銃グループを取得
@@ -112,6 +112,8 @@ function getActiveGunGroup() {
     const currentItem = INVENTORY[selectedItemIndex];
     if (currentItem === BLOCKS.TNT_LAUNCHER) return gunGroup;
     if (currentItem === BLOCKS.ROCKET_LAUNCHER) return rocketGunGroup;
+    if (currentItem === BLOCKS.RIFLE && typeof rifleGunGroup !== 'undefined') return rifleGunGroup;
+    if (currentItem === BLOCKS.RAILGUN && typeof railgunGunGroup !== 'undefined') return railgunGunGroup;
     return null;
 }
 
@@ -125,7 +127,7 @@ function updateGunAnimation(delta) {
     const activeGun = getActiveGunGroup();
     if (!activeGun || !activeGun.visible) return;
 
-    const defaultPos = activeGun === gunGroup ? gunDefaultPos : rocketGunDefaultPos;
+    const defaultPos = activeGun.userData.defPos || (activeGun === gunGroup ? gunDefaultPos : rocketGunDefaultPos);
     const defaultRot = gunDefaultRot;
 
     // 歩行時のボブ

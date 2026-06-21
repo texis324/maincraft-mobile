@@ -212,6 +212,87 @@ function disposeRocketMesh(mesh) {
     if (mesh.material) mesh.material.dispose();
 }
 
+// --- アサルトライフル: 視線上の最初の兵をヒットスキャンで撃つ（曳光弾＋銃声）。プレイヤーが直接戦える。
+const RIFLE_RANGE = 90;
+const RIFLE_DMG = 4;   // 兵HP6 → 2発で撃破（プレイヤーは強め）
+function fireRifle() {
+    if (typeof initAgentMesh === 'function') initAgentMesh(); // 曳光弾システムを確実に初期化
+    const dir = new THREE.Vector3(); camera.getWorldDirection(dir);
+    const o = camera.position;
+    const muzzle = o.clone().add(dir.clone().multiplyScalar(1.0)); muzzle.y -= 0.12;
+    const blk = voxelRaycast(o, dir, RIFLE_RANGE, false);          // 壁までの距離（壁の先は撃たない）
+    const maxT = blk ? blk.dist : RIFLE_RANGE;
+    const hit = (typeof rifleHitscan === 'function') ? rifleHitscan(o.x, o.y, o.z, dir.x, dir.y, dir.z, maxT, RIFLE_DMG) : null;
+    const ex = hit ? hit.x : o.x + dir.x * maxT, ey = hit ? hit.y : o.y + dir.y * maxT, ez = hit ? hit.z : o.z + dir.z * maxT;
+    if (typeof addTracerRGB === 'function') addTracerRGB(muzzle.x, muzzle.y, muzzle.z, ex, ey, ez, 1.0, 0.95, 0.4); // 黄の曳光弾
+    playSound('gunshot');
+    triggerGunRecoil();
+}
+
+// --- レールガン: 視線方向へ一直線にトンネルを穿つ（どんな山も貫く）。重なる球で連続トンネルにする。
+const RAIL_RANGE = 260;
+const RAIL_R = 1.6;
+const railBeams = [];
+function fireRailgun() {
+    const dir = new THREE.Vector3(); camera.getWorldDirection(dir);
+    const start = camera.position.clone().add(dir.clone().multiplyScalar(1.2)); // 足元を掘らないよう少し前から
+    const R = RAIL_R, Rc = Math.ceil(R), R2 = R * R;
+    const removed = new Set();
+    let any = false;
+    for (let t = 0; t <= RAIL_RANGE; t += 1.0) { // step≤R で球が重なり連続トンネルに
+        const cx = start.x + dir.x * t, cy = start.y + dir.y * t, cz = start.z + dir.z * t;
+        if (cy < worldBottomY) break;
+        const bx = Math.round(cx), by = Math.round(cy), bz = Math.round(cz);
+        for (let ddx = -Rc; ddx <= Rc; ddx++) for (let ddy = -Rc; ddy <= Rc; ddy++) for (let ddz = -Rc; ddz <= Rc; ddz++) {
+            if (ddx * ddx + ddy * ddy + ddz * ddz > R2) continue;
+            const x = bx + ddx, y = by + ddy, z = bz + ddz;
+            const key = x + ',' + y + ',' + z;
+            if (removed.has(key)) continue;
+            removed.add(key);
+            const tp = getBlock(x, y, z);
+            if (tp && tp !== BLOCKS.BEDROCK && !(BLOCK_PROPS[tp] && BLOCK_PROPS[tp].noCollide)) { removeBlock(x, y, z, true); any = true; }
+        }
+    }
+    if (any) flushDirtyChunks();
+    // 貫通線上の兵も薙ぎ払う
+    if (typeof agents !== 'undefined') {
+        for (let i = 0; i < agents.length; i++) {
+            const a = agents[i]; if (!a.alive) continue;
+            const tt = (a.x - start.x) * dir.x + ((a.y + 0.9) - start.y) * dir.y + (a.z - start.z) * dir.z;
+            if (tt < 0 || tt > RAIL_RANGE) continue;
+            const ex = start.x + dir.x * tt - a.x, ey = start.y + dir.y * tt - (a.y + 0.9), ez = start.z + dir.z * tt - a.z;
+            if (ex * ex + ey * ey + ez * ez < (R + 0.6) * (R + 0.6)) { a.hp = 0; a.alive = false; }
+        }
+    }
+    spawnRailBeam(start, new THREE.Vector3(start.x + dir.x * RAIL_RANGE, start.y + dir.y * RAIL_RANGE, start.z + dir.z * RAIL_RANGE));
+    playSound('railgun');
+    nukeScreenShake(0.5, 0.05);
+    triggerGunRecoil();
+}
+
+function spawnRailBeam(start, end) {
+    const dx = end.x - start.x, dy = end.y - start.y, dz = end.z - start.z;
+    const len = Math.sqrt(dx * dx + dy * dy + dz * dz) || 0.001;
+    const mesh = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.25, 0.25, len, 8),
+        new THREE.MeshBasicMaterial({ color: 0x00e5ff, transparent: true, opacity: 0.85 })
+    );
+    mesh.position.set(start.x + dx * 0.5, start.y + dy * 0.5, start.z + dz * 0.5);
+    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(dx / len, dy / len, dz / len));
+    mesh.frustumCulled = false;
+    scene.add(mesh);
+    railBeams.push({ mesh: mesh, life: 0.35, maxLife: 0.35 });
+}
+
+function updateRailBeams(delta) {
+    for (let i = railBeams.length - 1; i >= 0; i--) {
+        const b = railBeams[i];
+        b.life -= delta;
+        if (b.life <= 0) { scene.remove(b.mesh); b.mesh.geometry.dispose(); b.mesh.material.dispose(); railBeams.splice(i, 1); continue; }
+        b.mesh.material.opacity = 0.85 * (b.life / b.maxLife);
+    }
+}
+
 function updateRockets(delta) {
     for (let i = rockets.length - 1; i >= 0; i--) {
         const rocket = rockets[i];

@@ -91,6 +91,10 @@ function animate() {
 
         if (currentItem === BLOCKS.TNT_LAUNCHER) {
             currentDelay = LAUNCHER_DELAY;
+        } else if (currentItem === BLOCKS.RIFLE) {
+            currentDelay = RIFLE_DELAY;       // 押しっぱで連射
+        } else if (currentItem === BLOCKS.RAILGUN) {
+            currentDelay = RAILGUN_DELAY;     // 強力なのでクールダウン長め
         } else {
             const hSpeed = Math.sqrt(controls.velocity.x**2 + controls.velocity.z**2);
             if (hSpeed > 10) {
@@ -109,7 +113,8 @@ function animate() {
     updatePrimedTNTs(delta); // Update Physics TNT
     updateRockets(delta); // Update Rockets
     updateNukeMissiles(delta); // 核ミサイル（単弾頭/MIRV）の飛行・分裂・着弾を更新
-    updateAgents(delta); // AI破壊軍団の移動・破壊（InstancedMesh・ラウンドロビン思考・遅延メッシュ）
+    updateRailBeams(delta); // レールガンのビーム演出をフェード
+    updateAgents(delta); // AI陣営戦の移動・射撃（InstancedMesh・ラウンドロビン思考・曳光弾）
     updateGunAnimation(delta); // 銃のアニメーション更新
 
     // Physics & Movement

@@ -118,6 +118,44 @@ rocketGunGroup.rotation.set(0, -0.1, 0);
 rocketGunGroup.visible = false;
 
 camera.add(rocketGunGroup);
+
+// --- アサルトライフル View Model（プレイヤーが構える黒い銃） ---
+const rifleGunGroup = new THREE.Group();
+const _rBody = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.06, 0.34), new THREE.MeshLambertMaterial({ color: 0x1c1f24 }));
+_rBody.position.set(0, 0, -0.17); rifleGunGroup.add(_rBody);
+const _rBarrel = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.22, 8), new THREE.MeshLambertMaterial({ color: 0x111317 }));
+_rBarrel.rotation.x = Math.PI / 2; _rBarrel.position.set(0, 0.01, -0.34); rifleGunGroup.add(_rBarrel);
+const _rMag = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.11, 0.05), new THREE.MeshLambertMaterial({ color: 0x33373d }));
+_rMag.position.set(0, -0.08, -0.13); _rMag.rotation.x = -0.15; rifleGunGroup.add(_rMag);
+const _rGrip = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.1, 0.05), new THREE.MeshLambertMaterial({ color: 0x26292e }));
+_rGrip.position.set(0, -0.07, -0.02); _rGrip.rotation.x = 0.3; rifleGunGroup.add(_rGrip);
+const _rSight = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.03, 0.04), new THREE.MeshLambertMaterial({ color: 0x111317 }));
+_rSight.position.set(0, 0.05, -0.1); rifleGunGroup.add(_rSight);
+rifleGunGroup.position.set(0.26, -0.2, -0.5);
+rifleGunGroup.rotation.set(0, -0.08, 0);
+rifleGunGroup.userData.defPos = rifleGunGroup.position.clone();
+rifleGunGroup.visible = false;
+camera.add(rifleGunGroup);
+
+// --- レールガン View Model（スリムな本体＋発光するシアンのレール） ---
+const railgunGunGroup = new THREE.Group();
+const _glBody = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.07, 0.5), new THREE.MeshLambertMaterial({ color: 0x37474f }));
+_glBody.position.set(0, 0, -0.25); railgunGunGroup.add(_glBody);
+const _glRailMat = new THREE.MeshBasicMaterial({ color: 0x00e5ff });
+const _glRailT = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.012, 0.5), _glRailMat);
+_glRailT.position.set(0, 0.035, -0.25); railgunGunGroup.add(_glRailT);
+const _glRailB = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.012, 0.5), _glRailMat);
+_glRailB.position.set(0, -0.035, -0.25); railgunGunGroup.add(_glRailB);
+const _glMuzzle = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.05), new THREE.MeshBasicMaterial({ color: 0xb2ebf2 }));
+_glMuzzle.position.set(0, 0, -0.5); railgunGunGroup.add(_glMuzzle);
+const _glGrip = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.11, 0.06), new THREE.MeshLambertMaterial({ color: 0x263238 }));
+_glGrip.position.set(0, -0.08, -0.02); _glGrip.rotation.x = 0.25; railgunGunGroup.add(_glGrip);
+railgunGunGroup.position.set(0.27, -0.19, -0.5);
+railgunGunGroup.rotation.set(0, -0.1, 0);
+railgunGunGroup.userData.defPos = railgunGunGroup.position.clone();
+railgunGunGroup.visible = false;
+camera.add(railgunGunGroup);
+
 scene.add(camera); // カメラをシーンに追加（子オブジェクトを表示するため）
 
 // 銃のアニメーション用変数

@@ -254,11 +254,33 @@ function _agentFire(a, tgt) {
     }
 }
 
-function addTracer(x0, y0, z0, x1, y1, z1, faction) {
+function addTracerRGB(x0, y0, z0, x1, y1, z1, r, g, b) {
     if (tracers.length >= TRACER_MAX) tracers.shift(); // 上限超えたら古いのを捨てる
+    tracers.push({ x0: x0, y0: y0, z0: z0, x1: x1, y1: y1, z1: z1, life: TRACER_LIFE, r: r, g: g, b: b });
+}
+
+function addTracer(x0, y0, z0, x1, y1, z1, faction) {
     // 陣営色の明るい曳光弾（赤軍=橙赤、青軍=シアン）
     const r = faction === 0 ? 1.0 : 0.45, g = faction === 0 ? 0.45 : 0.8, b = faction === 0 ? 0.2 : 1.0;
-    tracers.push({ x0: x0, y0: y0, z0: z0, x1: x1, y1: y1, z1: z1, life: TRACER_LIFE, r: r, g: g, b: b });
+    addTracerRGB(x0, y0, z0, x1, y1, z1, r, g, b);
+}
+
+// プレイヤーのライフルが視線上の最初の兵を撃つ。命中したら hp を減らし命中点を返す（外れたら null）。
+function rifleHitscan(ox, oy, oz, dx, dy, dz, maxDist, dmg) {
+    if (!agents.length) return null;
+    let bestT = maxDist, best = null;
+    for (let i = 0; i < agents.length; i++) {
+        const a = agents[i];
+        if (!a.alive) continue;
+        const cx = a.x, cy = a.y + 0.9, cz = a.z;           // 胸の高さ
+        const t = (cx - ox) * dx + (cy - oy) * dy + (cz - oz) * dz; // 視線への射影距離
+        if (t < 0 || t > bestT) continue;
+        const ex = ox + dx * t - cx, ey = oy + dy * t - cy, ez = oz + dz * t - cz; // 視線から兵までの直交距離
+        if (ex * ex + ey * ey + ez * ez < 0.75 * 0.75) { bestT = t; best = a; }
+    }
+    if (!best) return null;
+    best.hp -= dmg; best.hitFlash = 0.25;
+    return { x: ox + dx * bestT, y: oy + dy * bestT, z: oz + dz * bestT };
 }
 
 function updateTracers(dt) {

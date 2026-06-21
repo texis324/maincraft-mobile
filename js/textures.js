@@ -226,6 +226,26 @@ function paintTile(ctx, type) {
         ctx.fillStyle = '#ffffff'; ctx.fillRect(28, 26, 4, 4); ctx.fillRect(35, 26, 4, 4); // 目
         ctx.fillStyle = '#222222'; ctx.fillRect(40, 34, 20, 5);      // 銃
         ctx.fillStyle = accent; ctx.fillRect(50, 6, 6, 16); ctx.fillRect(45, 11, 16, 6); // ＋（増援）
+    } else if (type === 'rifle') {
+        // アサルトライフル（横向きの黒い銃＋マガジン＋オレンジの照準）
+        ctx.fillStyle = '#2f3a22'; ctx.fillRect(0, 0, 64, 64);                 // 暗い迷彩地
+        ctx.fillStyle = '#1c1f24'; ctx.fillRect(8, 28, 44, 7);                 // 銃身＋レシーバー
+        ctx.fillStyle = '#1c1f24'; ctx.fillRect(48, 26, 12, 4);               // バレル先
+        ctx.fillStyle = '#33373d'; ctx.fillRect(12, 35, 8, 14);               // マガジン
+        ctx.fillStyle = '#26292e'; ctx.fillRect(6, 33, 8, 12);               // グリップ
+        ctx.fillStyle = '#26292e'; ctx.fillRect(22, 24, 6, 5);               // サイト
+        ctx.fillStyle = '#ffab00'; ctx.fillRect(50, 24, 3, 3);               // マズル(オレンジ)
+        ctx.fillStyle = '#ff5252'; ctx.fillRect(23, 25, 3, 1);               // 照準ドット
+    } else if (type === 'railgun') {
+        // レールガン（スリムな未来銃＋発光するシアンのレール＝山貫通の威力感）
+        ctx.fillStyle = '#0d1320'; ctx.fillRect(0, 0, 64, 64);
+        ctx.fillStyle = '#37474f'; ctx.fillRect(6, 28, 50, 8);               // 本体
+        ctx.fillStyle = '#00e5ff'; ctx.fillRect(8, 30, 46, 2);               // 上のレール(発光)
+        ctx.fillStyle = '#00e5ff'; ctx.fillRect(8, 34, 46, 2);               // 下のレール
+        ctx.fillStyle = '#263238'; ctx.fillRect(10, 36, 8, 12);             // グリップ
+        ctx.fillStyle = '#b2ebf2'; ctx.fillRect(54, 29, 6, 6);             // 砲口の発光
+        ctx.fillStyle = '#80d8ff'; ctx.fillRect(30, 22, 4, 6);             // エネルギーコイル
+        ctx.fillStyle = '#80d8ff'; ctx.fillRect(40, 22, 4, 6);
     }
 }
 
@@ -260,6 +280,8 @@ let penetratorTexture;
 let summonerTexture;
 let summonRedTexture;
 let summonBlueTexture;
+let rifleTexture;
+let railgunTexture;
 
 function initMaterials() {
     const grassTop = createTexture('grass_top');
@@ -291,6 +313,8 @@ function initMaterials() {
     summonerTexture = createTexture('summoner');
     summonRedTexture = createTexture('summon_red');
     summonBlueTexture = createTexture('summon_blue');
+    rifleTexture = createTexture('rifle');
+    railgunTexture = createTexture('railgun');
 
     materials[BLOCKS.GRASS] = [
         new THREE.MeshLambertMaterial({ map: grassSide }),

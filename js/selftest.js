@@ -160,16 +160,23 @@
                 return { ok: maxD >= 30, detail: maxD };
             });
 
-            // 11b) 城が生成される（近傍に石壁が地表より上に立つ）
+            // 11b) 城が生成される（外壁の大半が地表より上に石で立つ）。
+            //   ⚠ 単一点チェックは銃眼(クレネレーション)の隙間/門に当たると外れて脆い→外壁ラインを
+            //      サンプリングして「石の比率」で判定（壁は隙間込みで設計上6割超が石）。広域探索。
             run(results, 'castle generates', () => {
-                const c = findCastleNear(T + 30000, T + 30000, 120);
+                const c = findCastleNear(T + 30000, T + 30000, 600);
                 if (!c) return { ok: false, detail: 'no castle found' };
                 genArea(c.ax, c.az, 4);
-                // 外壁の1点（+x辺の中央付近）に地表より上の石があるか
-                const wx = c.ax + c.half, wz = c.az;
-                const above = getBlock(wx, c.gy + 2, wz);
                 const floor = getBlock(c.ax, c.gy, c.az);
-                return { ok: above === BLOCKS.STONE && floor === BLOCKS.STONE, detail: { at: [c.ax, c.gy, c.az], wall: above, floor: floor } };
+                let wallStone = 0, wallTotal = 0;
+                const h = c.half;
+                for (let t = -h; t <= h; t += 2) {
+                    for (const p of [[c.ax + t, c.az - h], [c.ax + t, c.az + h], [c.ax - h, c.az + t], [c.ax + h, c.az + t]]) {
+                        for (let dy = 1; dy <= 4; dy++) { wallTotal++; if (getBlock(p[0], c.gy + dy, p[1]) === BLOCKS.STONE) wallStone++; }
+                    }
+                }
+                const ratio = wallStone / wallTotal;
+                return { ok: floor === BLOCKS.STONE && ratio > 0.6, detail: { at: [c.ax, c.gy, c.az], floor: floor, wallRatio: +ratio.toFixed(2) } };
             });
 
             // 11c) 城を核攻撃 → live と「アンロード→再生成」が全ボクセル一致（高い塔/天守の不一致＝トラップ回帰検出）
@@ -384,6 +391,58 @@
                     return { ok: nr > 0 && onlyRed && corpsesLeft >= 3 && corpsesCleared, detail: { nr: nr, onlyRed: onlyRed, corpsesLeft: corpsesLeft } };
                 } catch (e) { clearAgents(); return { ok: false, detail: 'ERR ' + (e && e.message) }; }
                 finally { camera.position.copy(camSave); camera.updateMatrixWorld(true); }
+            });
+
+            // 11j) プレイヤーのライフルが視線上の兵をヒットスキャンで撃つ（HP減少）
+            run(results, 'rifle hitscan damages agent', () => {
+                const camSave = camera.position.clone(), camRot = camera.rotation.clone();
+                try {
+                    clearAgents();
+                    const X = T + 900, Z = T + 900;
+                    const baseY = Math.max(terrainHeightAt(X, Z), SEA_LEVEL) + 4;
+                    for (let dx = -3; dx <= 9; dx++) for (let dz = -3; dz <= 3; dz++) setBlockData(X + dx, baseY, Z + dz, BLOCKS.STONE);
+                    camera.position.set(X, baseY + 1.6, Z);
+                    camera.lookAt(X + 6, baseY + 1.9, Z); // 6ブロック先の兵の方向
+                    camera.updateMatrixWorld(true);
+                    const a = _makeAgent(X + 6, baseY + 1, Z, 1);
+                    agents.push(a);
+                    const hpBefore = a.hp;
+                    fireRifle();
+                    const hpAfter = a.hp;
+                    clearAgents();
+                    return { ok: hpAfter < hpBefore, detail: { hpBefore: hpBefore, hpAfter: hpAfter } };
+                } catch (e) { clearAgents(); return { ok: false, detail: 'ERR ' + (e && e.message) }; }
+                finally { camera.position.copy(camSave); camera.rotation.copy(camRot); camera.updateMatrixWorld(true); }
+            });
+
+            // 11k) レールガンが厚い壁を貫いてトンネルを穿つ（壁の中が空気になる）
+            run(results, 'railgun bores through wall', () => {
+                const camSave = camera.position.clone(), camRot = camera.rotation.clone();
+                try {
+                    const X = T + 960, Z = T + 960;
+                    const baseY = Math.max(terrainHeightAt(X, Z), SEA_LEVEL) + 6;
+                    genArea(X, Z, 1);
+                    for (let wx = X + 5; wx <= X + 14; wx++) for (let dy = -2; dy <= 2; dy++) for (let dz = -2; dz <= 2; dz++) setBlockData(wx, baseY + dy, Z + dz, BLOCKS.STONE);
+                    camera.position.set(X, baseY, Z);
+                    camera.lookAt(X + 10, baseY, Z); // +x の壁へ
+                    camera.updateMatrixWorld(true);
+                    const before = getBlock(X + 9, baseY, Z); // 壁の内部
+                    fireRailgun();
+                    const after = getBlock(X + 9, baseY, Z);
+                    return { ok: before !== 0 && after === 0, detail: { before: before, after: after } };
+                } catch (e) { return { ok: false, detail: 'ERR ' + (e && e.message) }; }
+                finally { camera.position.copy(camSave); camera.rotation.copy(camRot); camera.updateMatrixWorld(true); }
+            });
+
+            // 11l) クソデカい山が存在する（広域走査で通常の最高峰を超える＝giant項が効いている地点がある）
+            run(results, 'giant mountains exist', () => {
+                let maxH = -999;
+                for (let gx = 0; gx < 48; gx++) for (let gz = 0; gz < 48; gz++) {
+                    const h = terrainHeightAt(T + gx * 170, T + gz * 170); // 広域(約8000ブロック四方・giant波長の十数倍)
+                    if (h > maxH) maxH = h;
+                }
+                const normalMax = TERRAIN_BASE + TERRAIN_HILL_AMP + TERRAIN_MTN_AMP + TERRAIN_CONT_AMP;
+                return { ok: maxH > normalMax + 5, detail: { maxH: maxH, normalMax: normalMax } };
             });
 
             // 12) スポーンが固体地面の上（水中/空中でない）

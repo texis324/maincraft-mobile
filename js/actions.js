@@ -111,6 +111,18 @@ function attemptPlaceOrIgnite(screenX, screenY) {
         return;
     }
 
+    // アサルトライフル: 視線の兵をヒットスキャンで撃つ（連射）
+    if (currentItem === BLOCKS.RIFLE) {
+        fireRifle();
+        return;
+    }
+
+    // レールガン: 視線方向にトンネルを一直線に穿つ（どんな山も貫く）
+    if (currentItem === BLOCKS.RAILGUN) {
+        fireRailgun();
+        return;
+    }
+
     if (currentItem === BLOCKS.NUKE_MISSILE) {
         launchNukeMissile(false);
         return;

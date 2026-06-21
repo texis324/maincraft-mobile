@@ -17,6 +17,7 @@ const WORLD_HEIGHT = 8;
 let TERRAIN_HILL_AMP = 9;    // 細かい丘の振幅（高周波）
 let TERRAIN_MTN_AMP = 20;   // 大きな起伏=山/谷の振幅（低周波）
 let TERRAIN_CONT_AMP = 26;  // 大陸スケールの超低周波起伏（無限ワールドの探索に変化をつける）
+let TERRAIN_GIANT_AMP = 80; // クソデカい山（超低周波の高い所だけ鋭く持ち上げる・rare・additive＝谷は深くしない）
 let TERRAIN_BASE = SEA_LEVEL + 7; // 平均的な陸の高さ（海面より上）＝大部分を陸地にし谷だけ湖に
 let worldSeed = 0;          // 0=未設定。generateWorld で乱数化（再生成で更新・persistで保存）
 let maxSurfaceY = SURFACE_Y; // 生成時に算出する最高地表Y（スポーン/カリング基準）
@@ -30,6 +31,8 @@ const BREAK_DELAY = 250;
 // 上向き/通常は BREAK_DELAY のまま。将来上向きも速くしたくなったら FLY_DIG_UP_DELAY を足す。
 const FLY_DIG_DOWN_DELAY = 80;
 const LAUNCHER_DELAY = 200; // Fire rate for TNT gun
+const RIFLE_DELAY = 110;    // アサルトライフルの連射間隔（押しっぱで連射）
+const RAILGUN_DELAY = 550;  // レールガンの発射間隔（強力なのでクールダウン長め）
 
 const WALK_SPEED = 50.0;
 const SPRINT_SPEED = 120.0;
@@ -80,11 +83,13 @@ const BLOCKS = {
     PENETRATOR: 104,    // 地中貫通核（右クリで発射→着弾後に地中へ潜って起爆＝地下空洞＋陥没）
     SUMMONER: 105,      // AI陣営戦の召喚（右クリで赤軍＋青軍を同時召喚＝中央で会戦）
     SUMMON_RED: 106,    // 赤軍だけ召喚（負けてる側の増援＝リスポーンキル回避）
-    SUMMON_BLUE: 107    // 青軍だけ召喚
+    SUMMON_BLUE: 107,   // 青軍だけ召喚
+    RIFLE: 108,         // アサルトライフル（右クリ/C で連射・兵やモブを撃つ・曳光弾）
+    RAILGUN: 109        // レールガン（右クリでどんな山も貫くトンネルを一直線に穿つ）
 };
 
 // Initial Inventory Order
-let INVENTORY = [BLOCKS.GRASS, BLOCKS.STONE, BLOCKS.WOOD, BLOCKS.LEAVES, BLOCKS.TNT, BLOCKS.MEGA_TNT, BLOCKS.NUKE, BLOCKS.HBOMB, BLOCKS.TSAR, BLOCKS.FLINT, BLOCKS.WATER, BLOCKS.TNT_LAUNCHER, BLOCKS.ROCKET_LAUNCHER, BLOCKS.NUKE_MISSILE, BLOCKS.MIRV_MISSILE, BLOCKS.MISSILE_BUTTON, BLOCKS.PENETRATOR, BLOCKS.SUMMONER, BLOCKS.SUMMON_RED, BLOCKS.SUMMON_BLUE];
+let INVENTORY = [BLOCKS.GRASS, BLOCKS.STONE, BLOCKS.WOOD, BLOCKS.LEAVES, BLOCKS.TNT, BLOCKS.MEGA_TNT, BLOCKS.NUKE, BLOCKS.HBOMB, BLOCKS.TSAR, BLOCKS.FLINT, BLOCKS.WATER, BLOCKS.TNT_LAUNCHER, BLOCKS.ROCKET_LAUNCHER, BLOCKS.NUKE_MISSILE, BLOCKS.MIRV_MISSILE, BLOCKS.MISSILE_BUTTON, BLOCKS.PENETRATOR, BLOCKS.SUMMONER, BLOCKS.SUMMON_RED, BLOCKS.SUMMON_BLUE, BLOCKS.RIFLE, BLOCKS.RAILGUN];
 let selectedItemIndex = 0;
 let swapSourceIndex = -1;
 
@@ -125,6 +130,8 @@ const BLOCK_PROPS = {
     [BLOCKS.SUMMONER]: { isTool: true }, // AI陣営戦の召喚（設置不可・右クリで赤青同時召喚）
     [BLOCKS.SUMMON_RED]: { isTool: true }, // 赤軍だけ召喚
     [BLOCKS.SUMMON_BLUE]: { isTool: true }, // 青軍だけ召喚
+    [BLOCKS.RIFLE]: { isTool: true }, // アサルトライフル
+    [BLOCKS.RAILGUN]: { isTool: true }, // レールガン
     [BLOCKS.WATER]: { color: 0x2196F3, sound: 'water', transparent: true, opacity: 0.6, noCollide: true },
     [BLOCKS.BEDROCK]: { color: 0x000000, sound: 'hard' },
     [BLOCKS.FLINT]: { isTool: true },

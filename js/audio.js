@@ -4,6 +4,11 @@ const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 const masterGain = audioCtx.createGain();
 masterGain.gain.value = 0.5;
 
+// テスト/検証用の無音モード（URLに ?mute、または window.__setMute(true)）。masterGain を 0 に。
+let _audioMuted = false;
+function __setMute(on) { _audioMuted = !!on; masterGain.gain.value = _audioMuted ? 0 : 0.5; }
+if (typeof location !== 'undefined' && location.search.indexOf('mute') >= 0) __setMute(true);
+
 const compressor = audioCtx.createDynamicsCompressor();
 compressor.threshold.value = -10;
 compressor.knee.value = 40;
@@ -191,6 +196,29 @@ function playSound(type, materialType) {
         og.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
         o.connect(og); og.connect(masterGain);
         o.start(); o.stop(now + 0.06);
+        return;
+    }
+
+    if (type === 'railgun') {
+        // レールガン: 高速チャージ上昇トーン → 鋭い放電クラック → 余韻。重い一撃感。
+        const dur = 0.5;
+        const o = audioCtx.createOscillator();
+        o.type = 'sawtooth';
+        o.frequency.setValueAtTime(180, now);
+        o.frequency.exponentialRampToValueAtTime(1400, now + 0.12); // チャージ上昇
+        o.frequency.exponentialRampToValueAtTime(120, now + dur);
+        const og = audioCtx.createGain();
+        og.gain.setValueAtTime(0.0001, now);
+        og.gain.exponentialRampToValueAtTime(0.28, now + 0.12);
+        og.gain.exponentialRampToValueAtTime(0.01, now + dur);
+        o.connect(og); og.connect(masterGain); o.start(); o.stop(now + dur);
+        // 放電クラック（バンドパスノイズ）
+        const n = audioCtx.createBufferSource(); n.buffer = noiseBuffer;
+        const f = audioCtx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 2500; f.Q.value = 0.7;
+        const ng = audioCtx.createGain();
+        ng.gain.setValueAtTime(0.3, now + 0.1);
+        ng.gain.exponentialRampToValueAtTime(0.01, now + 0.35);
+        n.connect(f); f.connect(ng); ng.connect(masterGain); n.start(now + 0.1); n.stop(now + 0.35);
         return;
     }
 

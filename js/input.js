@@ -151,11 +151,14 @@ document.addEventListener('keydown', (event) => {
             }
         }
 
-        // Cキーで銃を発射
+        // Cキーで銃を発射（ランチャー/ロケラン/ライフル/レールガン）
         if (event.code === 'KeyC') {
             const currentItem = INVENTORY[selectedItemIndex];
-            if (currentItem === BLOCKS.TNT_LAUNCHER || currentItem === BLOCKS.ROCKET_LAUNCHER) {
-                if (performance.now() - lastActionTime > LAUNCHER_DELAY) {
+            const isGun = currentItem === BLOCKS.TNT_LAUNCHER || currentItem === BLOCKS.ROCKET_LAUNCHER
+                || currentItem === BLOCKS.RIFLE || currentItem === BLOCKS.RAILGUN;
+            if (isGun) {
+                const d = currentItem === BLOCKS.RIFLE ? RIFLE_DELAY : (currentItem === BLOCKS.RAILGUN ? RAILGUN_DELAY : LAUNCHER_DELAY);
+                if (performance.now() - lastActionTime > d) {
                     attemptPlaceOrIgnite();
                     lastActionTime = performance.now();
                 }

@@ -417,10 +417,15 @@ function terrainHeightAt(x, z) {
     const hills = fbm2(x * 0.025, z * 0.025, worldSeed, 4);                       // 細かい起伏
     const mountains = fbm2(x * 0.008 + 99, z * 0.008 + 99, worldSeed + 7777, 3);  // 山/谷
     const continent = fbm2(x * 0.0022 + 311, z * 0.0022 + 311, worldSeed + 4242, 2); // 大陸スケール
+    // クソデカい山: 超低周波ノイズの「高い所」だけを鋭く持ち上げる（additive＝谷は深くしない）。
+    // gp を [0,1] にクランプ＋二乗で、大部分は0・rare な高ノイズ地点だけが頂点まで届く＝巨大な山が点在。
+    const giant = fbm2(x * 0.0015 + 555, z * 0.0015 + 555, worldSeed + 8888, 2);
+    const gp = Math.min(1, Math.max(0, (giant - 0.58) / 0.30));
     const h = TERRAIN_BASE
         + (hills - 0.5) * 2 * TERRAIN_HILL_AMP
         + (mountains - 0.5) * 2 * TERRAIN_MTN_AMP
-        + (continent - 0.5) * 2 * TERRAIN_CONT_AMP;
+        + (continent - 0.5) * 2 * TERRAIN_CONT_AMP
+        + gp * gp * TERRAIN_GIANT_AMP;
     return Math.round(h);
 }
 
@@ -1046,7 +1051,7 @@ function recomputeVerticalBounds() {
     worldBottomY = SEA_LEVEL - 1 - WORLD_DEPTH;
     // 地表の理論最大高 = 中心(TERRAIN_BASE) + 全振幅。最高峰がチャンク垂直範囲(maxCY)から
     // こぼれてクリップされないよう余白を足す（TERRAIN_BASE 基準・SEA_LEVEL 基準ではない）。
-    maxSurfaceY = TERRAIN_BASE + TERRAIN_HILL_AMP + TERRAIN_MTN_AMP + TERRAIN_CONT_AMP + 8;
+    maxSurfaceY = TERRAIN_BASE + TERRAIN_HILL_AMP + TERRAIN_MTN_AMP + TERRAIN_CONT_AMP + TERRAIN_GIANT_AMP + 8;
     _minCY = Math.floor(worldBottomY / CS);
     _maxCY = Math.floor(maxSurfaceY / CS);
 }
