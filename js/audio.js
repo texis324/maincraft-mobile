@@ -27,6 +27,7 @@ const noiseBuffer = createNoiseBuffer();
 
 let lastExplosionTime = 0;
 let lastWhistleTime = 0; // 空爆ホイッスルのスロットル（同フレーム多重発火の間引き用）
+let lastGunshotTime = 0; // 兵の銃声のスロットル（大量同時発射でも潰れない＆スパイク防止）
 
 function playSound(type, materialType) {
     if (audioCtx.state === 'suspended') audioCtx.resume();
@@ -165,6 +166,31 @@ function playSound(type, materialType) {
         airGain.gain.exponentialRampToValueAtTime(0.001, now + dur);
         air.connect(airFilter); airFilter.connect(airGain); airGain.connect(masterGain);
         air.start(); air.stop(now + dur);
+        return;
+    }
+
+    if (type === 'gunshot') {
+        // 兵の銃声: 鋭いクラック（ハイパスノイズの破裂）＋低めの芯。大量同時発射でも潰れないよう間引き＆控えめ。
+        if (now - lastGunshotTime < 0.03) return;
+        lastGunshotTime = now;
+        const n = audioCtx.createBufferSource();
+        n.buffer = noiseBuffer;
+        const f = audioCtx.createBiquadFilter();
+        f.type = 'highpass'; f.frequency.value = 850 + Math.random() * 400;
+        const g = audioCtx.createGain();
+        g.gain.setValueAtTime(0.16, now);
+        g.gain.exponentialRampToValueAtTime(0.004, now + 0.06);
+        n.connect(f); f.connect(g); g.connect(masterGain);
+        n.start(); n.stop(now + 0.07);
+        const o = audioCtx.createOscillator();
+        o.type = 'square';
+        o.frequency.setValueAtTime(170, now);
+        o.frequency.exponentialRampToValueAtTime(50, now + 0.05);
+        const og = audioCtx.createGain();
+        og.gain.setValueAtTime(0.05, now);
+        og.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
+        o.connect(og); og.connect(masterGain);
+        o.start(); o.stop(now + 0.06);
         return;
     }
 

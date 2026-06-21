@@ -119,7 +119,9 @@ function animate() {
 
     if (controls.isFlying) {
         controls.velocity.y -= controls.velocity.y * 2.0 * delta; // Reduced Air resistance
-        if (controls.jump || controls.moveUp) controls.velocity.y += 30.0 * delta;
+        // スペース3回タップ＋長押しで上昇スピード2倍（ツァーリを地中に埋めた後の脱出用）
+        const ascendRate = controls.boostAscend ? 60.0 : 30.0;
+        if (controls.jump || controls.moveUp) controls.velocity.y += ascendRate * delta;
         if (controls.moveDown) controls.velocity.y -= 30.0 * delta;
     } else {
         controls.velocity.y -= GRAVITY * delta;

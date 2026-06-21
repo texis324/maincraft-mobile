@@ -3,6 +3,7 @@ let isLeftMouseDown = false;
 let isRightMouseDown = false;
 let lastActionTime = 0;
 let lastSpaceTime = 0; // For double jump detection
+let spaceTaps = 0;     // 連続スペースタップ数（2=飛行トグル / 3+長押し=上昇ブースト）
 let lastWTime = 0; // For dash detection
 
 // Event Listeners for UI
@@ -185,17 +186,25 @@ document.addEventListener('keydown', (event) => {
                     controls.canJump = false;
                 }
 
-                // Double Tap Detection
-                // キーの自動リピートでは判定しない（押しっぱなしで飛行モードが
-                // 誤って切り替わるのを防ぐ）
+                // 連続タップ判定（自動リピートは数えない＝押しっぱなしで誤作動しないように）
+                // 2回タップ=飛行トグル / 3回タップ＋長押し=上昇スピード2倍ブースト（ツァーリ埋め後の脱出用）
                 if (!event.repeat) {
                     const now = performance.now();
-                    if (now - lastSpaceTime < 300) {
+                    if (now - lastSpaceTime < 300) spaceTaps++; else spaceTaps = 1;
+                    lastSpaceTime = now;
+                    if (spaceTaps === 2) {
                         controls.isFlying = !controls.isFlying;
                         controls.velocity.y = 0; // Stop falling
                         document.getElementById('fly-mode-indicator').style.display = controls.isFlying ? 'block' : 'none';
+                    } else if (spaceTaps >= 3) {
+                        // 3回目以降＝上昇ブースト。飛行を確実にONにして、押している間だけ2倍上昇。
+                        if (!controls.isFlying) {
+                            controls.isFlying = true;
+                            controls.velocity.y = 0;
+                            document.getElementById('fly-mode-indicator').style.display = 'block';
+                        }
+                        controls.boostAscend = true;
                     }
-                    lastSpaceTime = now;
                 }
                 break;
         }
@@ -213,7 +222,7 @@ document.addEventListener('keyup', (event) => {
         case 'ArrowRight': case 'KeyD': controls.moveRight = false; break;
         case 'ShiftLeft': case 'ShiftRight': controls.moveUp = false; break;
         case 'ControlLeft': case 'ControlRight': controls.moveDown = false; break;
-        case 'Space': controls.jump = false; break;
+        case 'Space': controls.jump = false; controls.boostAscend = false; break;
     }
 });
 

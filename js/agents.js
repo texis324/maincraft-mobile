@@ -60,6 +60,13 @@ let tracerLines = null, tracerGeo = null;
 const _tracerPos = new Float32Array(TRACER_MAX * 6);
 const _tracerCol = new Float32Array(TRACER_MAX * 6);
 
+// --- 死体（corpse）プール: 戦死した兵を倒れたスラブとして残す（戦争っぽさ）。1ドローコール ---
+const CORPSE_MAX = 500;          // 上限（超えたら古いのから消える）
+const corpses = [];              // {x,y,z,faction,yaw}
+let corpseMesh = null, _corpsesDirty = false;
+const _corpseDummy = new THREE.Object3D();
+let _agentShotSndCD = 0;         // 銃声のグローバル間引き（大量同時発射で playSound を呼びすぎない）
+
 function createAgentTexture() {
     const c = document.createElement('canvas'); c.width = c.height = 32;
     const x = c.getContext('2d');
@@ -108,7 +115,41 @@ function initAgentMesh() {
     gunMesh.frustumCulled = false;
     gunMesh.count = 0;
     scene.add(gunMesh);
+    // 死体（倒れた兵のスラブ・暗い陣営色）。死亡時にだけ書き換える（毎フレームは触らない）。
+    const cgeo = new THREE.BoxGeometry(0.75, 0.4, 1.5);
+    const cmat = new THREE.MeshLambertMaterial({ color: 0xffffff });
+    corpseMesh = new THREE.InstancedMesh(cgeo, cmat, CORPSE_MAX);
+    corpseMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    corpseMesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(CORPSE_MAX * 3), 3);
+    corpseMesh.frustumCulled = false;
+    corpseMesh.count = 0;
+    scene.add(corpseMesh);
     initTracers();
+}
+
+// 戦死した兵を死体として残す（カリング/奈落落下では残さない＝実際に倒された時だけ）。
+function addCorpse(x, y, z, faction) {
+    if (corpses.length >= CORPSE_MAX) corpses.shift();
+    corpses.push({ x: x, y: y, z: z, faction: faction, yaw: Math.random() * Math.PI * 2 });
+    _corpsesDirty = true;
+}
+
+function rebuildCorpses() {
+    if (!corpseMesh || !_corpsesDirty) return; // 死体が増減した時だけ作り直す
+    const n = Math.min(corpses.length, CORPSE_MAX);
+    for (let i = 0; i < n; i++) {
+        const c = corpses[i];
+        _corpseDummy.position.set(c.x, c.y + 0.2, c.z); // 地面に伏せる（スラブ高0.4）
+        _corpseDummy.rotation.set(0, c.yaw, 0);
+        _corpseDummy.updateMatrix();
+        corpseMesh.setMatrixAt(i, _corpseDummy.matrix);
+        _cTmp.copy(c.faction === 0 ? _cRed : _cBlue).multiplyScalar(0.42); // 暗い陣営色＝死体
+        corpseMesh.setColorAt(i, _cTmp);
+    }
+    corpseMesh.count = n;
+    corpseMesh.instanceMatrix.needsUpdate = true;
+    if (corpseMesh.instanceColor) corpseMesh.instanceColor.needsUpdate = true;
+    _corpsesDirty = false;
 }
 
 // 1体を生成して返す（summon と selftest が共用）。
@@ -122,32 +163,44 @@ function _makeAgent(x, y, z, faction, heading) {
     };
 }
 
-// プレイヤーの左右に赤軍・青軍を同時召喚＝中央で会戦になる。連打で増援（上限まで）。
-function summonLegion() {
+// 1陣営だけをプレイヤー周囲に召喚（既定: 赤=西寄り/青=東寄りの弧に展開）。
+// これで「片方だけ増やす」＝負けてる側だけ増援できる＝リスポーンキル(敵陣のど真ん中に湧いて即死)を避けられる。
+// onWest を明示すると湧く方角を上書きできる（summonLegion が地形の有利不利を陣営に偏らせないために使う）。
+function summonFaction(faction, onWest) {
     initAgentMesh();
     const px = camera.position.x, pz = camera.position.z;
+    const perSide = Math.floor(AGENT_WAVE / 2); // 1陣営40体
+    const west = (onWest === undefined) ? (faction === 0) : onWest;
+    const baseAng = west ? Math.PI : 0;   // 西=π / 東=0
     let spawned = 0;
-    const perSide = Math.floor(AGENT_WAVE / 2);
-    for (let f = 0; f < 2; f++) {
-        const baseAng = (f === 0) ? Math.PI : 0;   // 赤=西、青=東
-        for (let i = 0; i < perSide && agents.length < AGENT_MAX; i++) {
-            const ang = baseAng + (Math.random() - 0.5) * 1.6;
-            const r = 18 + Math.random() * 26; // 自陣側に広く展開（大軍が密集しすぎないよう）
-            const x = px + Math.cos(ang) * r, z = pz + Math.sin(ang) * r;
-            const top = columnTopY(Math.floor(x), Math.floor(z));
-            const y = Math.max(top, SEA_LEVEL) + 1;
-            agents.push(_makeAgent(x, y, z, f, baseAng + Math.PI + (Math.random() - 0.5) * 0.4));
-            spawned++;
-        }
+    for (let i = 0; i < perSide && agents.length < AGENT_MAX; i++) {
+        const ang = baseAng + (Math.random() - 0.5) * 1.6;
+        const r = 18 + Math.random() * 26; // 自陣側に広く展開（大軍が密集しすぎないよう）
+        const x = px + Math.cos(ang) * r, z = pz + Math.sin(ang) * r;
+        const top = columnTopY(Math.floor(x), Math.floor(z));
+        const y = Math.max(top, SEA_LEVEL) + 1;
+        agents.push(_makeAgent(x, y, z, faction, baseAng + Math.PI + (Math.random() - 0.5) * 0.4));
+        spawned++;
     }
     if (spawned > 0 && typeof playSound === 'function') playSound('ignite');
     return spawned;
+}
+
+// プレイヤーの左右に赤軍・青軍を同時召喚＝中央で会戦（SUMMONER アイテム・selftest が使用）。
+// どちらの陣営が西/東に湧くかを毎回ランダム化＝地形の有利不利が常に同じ陣営(赤)に偏らないように。
+// （戦闘ロジック自体は対称＝平地では均衡。勝者は湧いた方角の地形差で決まりがちなので、それを散らす）
+function summonLegion() {
+    const redWest = Math.random() < 0.5;
+    return summonFaction(0, redWest) + summonFaction(1, !redWest);
 }
 
 function clearAgents() {
     agents.length = 0;
     if (agentMesh) agentMesh.count = 0;
     if (gunMesh) gunMesh.count = 0;
+    corpses.length = 0;
+    if (corpseMesh) corpseMesh.count = 0;
+    _corpsesDirty = false;
     tracers.length = 0;
     if (tracerGeo) tracerGeo.setDrawRange(0, 0);
 }
@@ -194,6 +247,11 @@ function _agentFire(a, tgt) {
         ex = tgt.x + (Math.random() - 0.5) * 3.0; ey = tgt.y + 0.9 + (Math.random() - 0.5) * 1.6; ez = tgt.z + (Math.random() - 0.5) * 3.0;
     }
     addTracer(mx, my, mz, ex, ey, ez, a.faction);
+    // 銃声: プレイヤー近く(60ブロック以内)の発射だけ、グローバル間引きで鳴らす（大量発射でスパムしない）。
+    if (_agentShotSndCD <= 0 && typeof playSound === 'function') {
+        const ddx = a.x - camera.position.x, ddz = a.z - camera.position.z;
+        if (ddx * ddx + ddz * ddz < 3600) { _agentShotSndCD = 0.045; playSound('gunshot'); }
+    }
 }
 
 function addTracer(x0, y0, z0, x1, y1, z1, faction) {
@@ -221,8 +279,9 @@ function updateTracers(dt) {
 
 function updateAgents(delta) {
     const dt = Math.min(delta, 0.05);
-    if (!agentMesh || agents.length === 0) { if (agentMesh) agentMesh.count = 0; if (gunMesh) gunMesh.count = 0; updateTracers(dt); return; }
+    if (!agentMesh || agents.length === 0) { if (agentMesh) agentMesh.count = 0; if (gunMesh) gunMesh.count = 0; rebuildCorpses(); updateTracers(dt); return; }
     if (_agentDeathFxCD > 0) _agentDeathFxCD -= delta;
+    if (_agentShotSndCD > 0) _agentShotSndCD -= delta;
     const px = camera.position.x, pz = camera.position.z;
     const cull = VIEW_DIST * 16;
 
@@ -250,13 +309,14 @@ function updateAgents(delta) {
         const a = agents[i];
         if (!a.alive || a.hp <= 0) {
             a.alive = false;
+            addCorpse(a.x, a.y, a.z, a.faction); // 戦死＝死体を残す（戦争っぽさ）
             if (_agentDeathFxCD <= 0 && typeof createBlockParticles === 'function') {
                 _agentDeathFxCD = 0.08; createBlockParticles(a.x, a.y, a.z, BLOCKS.STONE, 2, 0.14);
             }
             agents.splice(i, 1); continue;
         }
         if (Math.abs(a.x - px) > cull || Math.abs(a.z - pz) > cull || a.y < worldBottomY + 1) {
-            a.alive = false; agents.splice(i, 1); continue;
+            a.alive = false; agents.splice(i, 1); continue; // カリング/奈落は死体を残さない
         }
         if (a.hitFlash > 0) a.hitFlash -= dt;
         if (a.fireCd > 0) a.fireCd -= dt;
@@ -342,5 +402,6 @@ function updateAgents(delta) {
         _battleOverTimer = 0;
     }
 
+    rebuildCorpses(); // 死体が増減した時だけ作り直す（毎フレームはノーオペ）
     updateTracers(dt);
 }

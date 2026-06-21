@@ -212,6 +212,20 @@ function paintTile(ctx, type) {
         const bots=[[16,10],[28,6],[40,10]];                           // 3体のボクセル兵
         for(const b of bots){ ctx.fillStyle='#2b2f33'; ctx.fillRect(b[0],b[1],10,18);
             ctx.fillStyle='#ff1744'; ctx.fillRect(b[0]+2,b[1]+4,2,2); ctx.fillRect(b[0]+6,b[1]+4,2,2); }
+    } else if (type === 'summon_red' || type === 'summon_blue') {
+        // 片陣営の増援召喚: ヘルメットを被った兵（陣営色）＋増援の「＋」バッジ
+        const red = type === 'summon_red';
+        const bg = red ? '#2a1414' : '#14202a';
+        const body = red ? '#e53935' : '#3d5afe';
+        const helm = red ? '#8e1f1f' : '#1f3a8e';
+        const accent = red ? '#ff8a80' : '#82b1ff';
+        ctx.fillStyle = bg; ctx.fillRect(0, 0, 64, 64);
+        ctx.fillStyle = body; ctx.fillRect(24, 22, 18, 30);          // 胴体
+        ctx.fillStyle = helm; ctx.fillRect(22, 12, 22, 10);          // ヘルメット
+        ctx.fillStyle = '#1a1a1a'; ctx.fillRect(22, 22, 22, 2);      // ブリム
+        ctx.fillStyle = '#ffffff'; ctx.fillRect(28, 26, 4, 4); ctx.fillRect(35, 26, 4, 4); // 目
+        ctx.fillStyle = '#222222'; ctx.fillRect(40, 34, 20, 5);      // 銃
+        ctx.fillStyle = accent; ctx.fillRect(50, 6, 6, 16); ctx.fillRect(45, 11, 16, 6); // ＋（増援）
     }
 }
 
@@ -244,6 +258,8 @@ let mirvMissileTexture;
 let missileButtonTexture;
 let penetratorTexture;
 let summonerTexture;
+let summonRedTexture;
+let summonBlueTexture;
 
 function initMaterials() {
     const grassTop = createTexture('grass_top');
@@ -273,6 +289,8 @@ function initMaterials() {
     missileButtonTexture = createTexture('missile_button');
     penetratorTexture = createTexture('penetrator');
     summonerTexture = createTexture('summoner');
+    summonRedTexture = createTexture('summon_red');
+    summonBlueTexture = createTexture('summon_blue');
 
     materials[BLOCKS.GRASS] = [
         new THREE.MeshLambertMaterial({ map: grassSide }),

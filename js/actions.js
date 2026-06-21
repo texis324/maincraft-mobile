@@ -133,9 +133,19 @@ function attemptPlaceOrIgnite(screenX, screenY) {
         return;
     }
 
-    // AI破壊軍団の召喚: ボクセル兵の群れを周囲に召喚（世界をカオスに破壊）
+    // AI陣営戦の召喚: 赤軍＋青軍を同時召喚（中央で会戦）
     if (currentItem === BLOCKS.SUMMONER) {
         summonLegion();
+        return;
+    }
+    // 赤軍だけ召喚（負けてる側の増援＝リスポーンキル回避）
+    if (currentItem === BLOCKS.SUMMON_RED) {
+        summonFaction(0);
+        return;
+    }
+    // 青軍だけ召喚
+    if (currentItem === BLOCKS.SUMMON_BLUE) {
+        summonFaction(1);
         return;
     }
 

@@ -364,6 +364,28 @@
                 finally { camera.position.copy(camSave); camera.updateMatrixWorld(true); }
             });
 
+            // 11i) 片陣営だけ召喚（summonFaction）＋戦死で死体が残る／clearAgentsで死体も消える
+            run(results, 'summon one faction + corpses remain', () => {
+                const camSave = camera.position.clone();
+                try {
+                    clearAgents();
+                    const X = T + 780, Z = T + 780;
+                    const baseY = Math.max(terrainHeightAt(X, Z), SEA_LEVEL) + 4;
+                    for (let dx = -8; dx <= 8; dx++) for (let dz = -8; dz <= 8; dz++) setBlockData(X + dx, baseY, Z + dz, BLOCKS.STONE);
+                    camera.position.set(X, baseY + 2, Z);
+                    const nr = summonFaction(0);                                  // 赤だけ
+                    const onlyRed = agents.length === nr && agents.every(a => a.faction === 0);
+                    // 数体倒して死体を確認
+                    for (let k = 0; k < Math.min(3, agents.length); k++) agents[k].hp = 0;
+                    updateAgents(0.05);
+                    const corpsesLeft = corpses.length;                          // 死体が残る
+                    clearAgents();
+                    const corpsesCleared = corpses.length === 0;                  // clearで死体も消える
+                    return { ok: nr > 0 && onlyRed && corpsesLeft >= 3 && corpsesCleared, detail: { nr: nr, onlyRed: onlyRed, corpsesLeft: corpsesLeft } };
+                } catch (e) { clearAgents(); return { ok: false, detail: 'ERR ' + (e && e.message) }; }
+                finally { camera.position.copy(camSave); camera.updateMatrixWorld(true); }
+            });
+
             // 12) スポーンが固体地面の上（水中/空中でない）
             run(results, 'spawn on solid ground', () => {
                 spawnPlayer();
