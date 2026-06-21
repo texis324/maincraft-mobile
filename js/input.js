@@ -20,6 +20,14 @@ document.getElementById('btn-reset').addEventListener('click', () => {
 });
 document.getElementById('btn-close-inv').addEventListener('click', toggleInventory);
 
+// 🚜 降車ボタン（PCクリック＋モバイルタップ両対応）
+const exitTankBtn = document.getElementById('btn-exit-tank');
+if (exitTankBtn) {
+    const doExit = (e) => { e.preventDefault(); e.stopPropagation(); if (typeof exitTank === 'function') exitTank(); };
+    exitTankBtn.addEventListener('click', doExit);
+    exitTankBtn.addEventListener('touchstart', doExit, { passive: false });
+}
+
 document.getElementById('sensitivity').addEventListener('input', (e) => { mouseSensitivity = e.target.value * 0.0005; });
 document.getElementById('touch-sensitivity').addEventListener('input', (e) => { mobileLookSensitivity = e.target.value * 0.001; });
 document.getElementById('rocket-power').addEventListener('input', (e) => {
@@ -143,6 +151,18 @@ document.addEventListener('keydown', (event) => {
         if (event.code === 'Digit9') setSlot(8);
         if (event.code === 'Digit0') setSlot(9);
 
+        // Fキーで戦車に乗降（近くに戦車があれば搭乗 / 無ければ召喚して搭乗 / 搭乗中は降車）
+        if (event.code === 'KeyF' && !event.repeat) {
+            if (typeof tankToggle === 'function') tankToggle();
+            return;
+        }
+
+        // 戦車搭乗中はCキーでも砲撃
+        if (event.code === 'KeyC' && typeof inTank !== 'undefined' && inTank) {
+            if (typeof fireTankShell === 'function') fireTankShell();
+            return;
+        }
+
         // Gキーで空爆要請（上空から爆弾の雨）
         if (event.code === 'KeyG' && !event.repeat) {
             if (performance.now() - lastActionTime > 500) {
@@ -254,6 +274,14 @@ document.addEventListener('mousedown', (event) => {
     if (document.pointerLockElement !== document.body) {
         safeRequestPointerLock();
         if (audioCtx.state === 'suspended') audioCtx.resume();
+        return;
+    }
+
+    // 戦車搭乗中: 左右どちらのクリックでも砲撃（押しっぱ連射は main.js が処理）
+    if (typeof inTank !== 'undefined' && inTank) {
+        if (event.button === 0) isLeftMouseDown = true;
+        else if (event.button === 2) isRightMouseDown = true;
+        if (typeof fireTankShell === 'function') fireTankShell();
         return;
     }
 

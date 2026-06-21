@@ -85,11 +85,12 @@ const BLOCKS = {
     SUMMON_RED: 106,    // 赤軍だけ召喚（負けてる側の増援＝リスポーンキル回避）
     SUMMON_BLUE: 107,   // 青軍だけ召喚
     RIFLE: 108,         // アサルトライフル（右クリ/C で連射・兵やモブを撃つ・曳光弾）
-    RAILGUN: 109        // レールガン（右クリでどんな山も貫くトンネルを一直線に穿つ）
+    RAILGUN: 109,       // レールガン（右クリでどんな山も貫くトンネルを一直線に穿つ）
+    TANK: 110           // 戦車（右クリで召喚して搭乗→WASD走行・マウスで砲塔旋回・クリックで砲撃）
 };
 
 // Initial Inventory Order
-let INVENTORY = [BLOCKS.GRASS, BLOCKS.STONE, BLOCKS.WOOD, BLOCKS.LEAVES, BLOCKS.TNT, BLOCKS.MEGA_TNT, BLOCKS.NUKE, BLOCKS.HBOMB, BLOCKS.TSAR, BLOCKS.FLINT, BLOCKS.WATER, BLOCKS.TNT_LAUNCHER, BLOCKS.ROCKET_LAUNCHER, BLOCKS.NUKE_MISSILE, BLOCKS.MIRV_MISSILE, BLOCKS.MISSILE_BUTTON, BLOCKS.PENETRATOR, BLOCKS.SUMMONER, BLOCKS.SUMMON_RED, BLOCKS.SUMMON_BLUE, BLOCKS.RIFLE, BLOCKS.RAILGUN];
+let INVENTORY = [BLOCKS.GRASS, BLOCKS.STONE, BLOCKS.WOOD, BLOCKS.LEAVES, BLOCKS.TNT, BLOCKS.MEGA_TNT, BLOCKS.NUKE, BLOCKS.HBOMB, BLOCKS.TSAR, BLOCKS.FLINT, BLOCKS.WATER, BLOCKS.TNT_LAUNCHER, BLOCKS.ROCKET_LAUNCHER, BLOCKS.NUKE_MISSILE, BLOCKS.MIRV_MISSILE, BLOCKS.MISSILE_BUTTON, BLOCKS.PENETRATOR, BLOCKS.SUMMONER, BLOCKS.SUMMON_RED, BLOCKS.SUMMON_BLUE, BLOCKS.RIFLE, BLOCKS.RAILGUN, BLOCKS.TANK];
 let selectedItemIndex = 0;
 let swapSourceIndex = -1;
 
@@ -132,6 +133,7 @@ const BLOCK_PROPS = {
     [BLOCKS.SUMMON_BLUE]: { isTool: true }, // 青軍だけ召喚
     [BLOCKS.RIFLE]: { isTool: true }, // アサルトライフル
     [BLOCKS.RAILGUN]: { isTool: true }, // レールガン
+    [BLOCKS.TANK]: { isTool: true }, // 戦車（設置不可・右クリで召喚＆搭乗 / 搭乗中は砲撃）
     [BLOCKS.WATER]: { color: 0x2196F3, sound: 'water', transparent: true, opacity: 0.6, noCollide: true },
     [BLOCKS.BEDROCK]: { color: 0x000000, sound: 'hard' },
     [BLOCKS.FLINT]: { isTool: true },

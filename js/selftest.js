@@ -445,6 +445,103 @@
                 return { ok: maxH > normalMax + 5, detail: { maxH: maxH, normalMax: normalMax } };
             });
 
+            // 11m) 戦車を召喚＆搭乗→平地に接地し inTank=true。降車で inTank=false＆戦車は残る。
+            run(results, 'tank spawn/board/exit', () => {
+                const camSave = camera.position.clone(), camRot = camera.rotation.clone();
+                try {
+                    const X = T + 1020, Z = T + 1020;
+                    const baseY = Math.max(terrainHeightAt(X, Z), SEA_LEVEL) + 4;
+                    for (let dx = -10; dx <= 10; dx++) for (let dz = -10; dz <= 10; dz++) setBlockData(X + dx, baseY, Z + dz, BLOCKS.STONE);
+                    camera.position.set(X, baseY + 2, Z);
+                    camera.rotation.set(0, 0, 0);
+                    camera.updateMatrixWorld(true);
+                    spawnTank(); boardTank();
+                    const boarded = inTank === true && tank !== null;
+                    // 接地: 戦車のYが石の上面（baseY+1）付近
+                    const grounded = Math.abs(tank.y - (baseY + 1)) <= 1.5;
+                    exitTank();
+                    const exited = inTank === false && tank !== null; // 降車しても戦車は残る
+                    removeTank();
+                    return { ok: boarded && grounded && exited, detail: { boarded: boarded, tankY: tank ? tank.y : 'gone', baseY: baseY, exited: exited } };
+                } catch (e) { inTank = false; removeTank(); return { ok: false, detail: 'ERR ' + (e && e.message) }; }
+                finally { camera.position.copy(camSave); camera.rotation.copy(camRot); camera.updateMatrixWorld(true); }
+            });
+
+            // 11n) 搭乗して前進入力すると戦車の水平位置が動く（走行物理）。
+            run(results, 'tank drives forward', () => {
+                const camSave = camera.position.clone(), camRot = camera.rotation.clone();
+                const fSave = controls.moveForward;
+                try {
+                    const X = T + 1080, Z = T + 1080;
+                    const baseY = Math.max(terrainHeightAt(X, Z), SEA_LEVEL) + 4;
+                    for (let dx = -16; dx <= 16; dx++) for (let dz = -16; dz <= 16; dz++) setBlockData(X + dx, baseY, Z + dz, BLOCKS.STONE);
+                    camera.position.set(X, baseY + 2, Z);
+                    camera.rotation.set(0, 0, 0);
+                    camera.updateMatrixWorld(true);
+                    spawnTank(); boardTank();
+                    const x0 = tank.x, z0 = tank.z;
+                    controls.moveForward = true;
+                    for (let s = 0; s < 30; s++) updateTankDriving(0.05); // 1.5秒走行
+                    controls.moveForward = false;
+                    const moved = Math.hypot(tank.x - x0, tank.z - z0);
+                    inTank = false; removeTank();
+                    return { ok: moved > 2, detail: { moved: +moved.toFixed(2) } };
+                } catch (e) { controls.moveForward = false; inTank = false; removeTank(); return { ok: false, detail: 'ERR ' + (e && e.message) }; }
+                finally { controls.moveForward = fSave; camera.position.copy(camSave); camera.rotation.copy(camRot); camera.updateMatrixWorld(true); }
+            });
+
+            // 11o) 主砲弾が壁に当たって爆発しクレーターを作る（壁の内部が空気になる）。
+            run(results, 'tank shell craters wall', () => {
+                const camSave = camera.position.clone(), camRot = camera.rotation.clone();
+                const evLen = (typeof explosionEvents !== 'undefined') ? explosionEvents.length : 0;
+                try {
+                    const X = T + 1140, Z = T + 1140;
+                    const baseY = Math.max(terrainHeightAt(X, Z), SEA_LEVEL) + 6;
+                    genArea(X, Z, 1);
+                    for (let dx = -4; dx <= 4; dx++) for (let dz = -4; dz <= 4; dz++) setBlockData(X + dx, baseY - 4, Z + dz, BLOCKS.STONE); // 足場
+                    for (let wx = X + 6; wx <= X + 12; wx++) for (let dy = -2; dy <= 3; dy++) for (let dz = -3; dz <= 3; dz++) setBlockData(wx, baseY + dy, Z + dz, BLOCKS.STONE); // 壁
+                    camera.position.set(X, baseY, Z);
+                    camera.lookAt(X + 9, baseY, Z);
+                    camera.updateMatrixWorld(true);
+                    spawnTank(); boardTank();
+                    tank.x = X; tank.y = baseY; tank.z = Z; tank.fireCd = 0;
+                    const before = getBlock(X + 9, baseY, Z); // 壁の内部
+                    fireTankShell();
+                    let resolved = false;
+                    for (let s = 0; s < 80 && !resolved; s++) { updateTankShells(0.03); if (tankShells.length === 0) resolved = true; }
+                    const after = getBlock(X + 9, baseY, Z);
+                    inTank = false; removeTank();
+                    return { ok: before !== 0 && after === 0 && resolved, detail: { before: before, after: after, resolved: resolved } };
+                } catch (e) { inTank = false; removeTank(); tankShells.length = 0; return { ok: false, detail: 'ERR ' + (e && e.message) }; }
+                finally { if (typeof explosionEvents !== 'undefined') explosionEvents.length = evLen; camera.position.copy(camSave); camera.rotation.copy(camRot); camera.updateMatrixWorld(true); }
+            });
+
+            // 11p) 走行中の戦車が履帯で兵を轢き殺す（killAgentsInRadius）。
+            run(results, 'tank crushes soldiers', () => {
+                const camSave = camera.position.clone(), camRot = camera.rotation.clone();
+                try {
+                    clearAgents();
+                    const X = T + 1200, Z = T + 1200;
+                    const baseY = Math.max(terrainHeightAt(X, Z), SEA_LEVEL) + 4;
+                    for (let dx = -14; dx <= 14; dx++) for (let dz = -6; dz <= 6; dz++) setBlockData(X + dx, baseY, Z + dz, BLOCKS.STONE);
+                    camera.position.set(X, baseY + 2, Z);
+                    camera.rotation.set(0, 0, 0);
+                    camera.updateMatrixWorld(true);
+                    spawnTank(); boardTank();
+                    tank.x = X; tank.y = baseY + 1; tank.z = Z; tank.hullYaw = 0; tank.speed = 6; // +x へ走行
+                    const a1 = _makeAgent(X + 1, baseY + 1, Z, 1);
+                    const a2 = _makeAgent(X + 2, baseY + 1, Z, 1);
+                    agents.push(a1, a2);
+                    controls.moveForward = true;
+                    for (let s = 0; s < 5; s++) updateTankDriving(0.05);
+                    controls.moveForward = false;
+                    const killed = (!a1.alive) || (!a2.alive);
+                    inTank = false; removeTank(); clearAgents();
+                    return { ok: killed, detail: { a1: a1.alive, a2: a2.alive } };
+                } catch (e) { controls.moveForward = false; inTank = false; removeTank(); clearAgents(); return { ok: false, detail: 'ERR ' + (e && e.message) }; }
+                finally { camera.position.copy(camSave); camera.rotation.copy(camRot); camera.updateMatrixWorld(true); }
+            });
+
             // 12) スポーンが固体地面の上（水中/空中でない）
             run(results, 'spawn on solid ground', () => {
                 spawnPlayer();
@@ -454,6 +551,9 @@
 
         } finally {
             // 後片付け: カメラ/選択を復元、テストで作った chunk と edit を破棄、save を汚さない
+            if (typeof inTank !== 'undefined') inTank = false;           // 戦車テストの取りこぼし保険
+            if (typeof removeTank === 'function') removeTank();
+            if (typeof tankShells !== 'undefined') tankShells.length = 0;
             camera.position.copy(camPos); camera.rotation.copy(camRot); controls.isFlying = wasFly; selectedItemIndex = selIdx;
             camera.updateMatrixWorld(true);
             for (const k in editsByChunk) if (!editKeysBefore.has(k)) delete editsByChunk[k];

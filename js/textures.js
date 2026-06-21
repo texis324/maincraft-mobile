@@ -246,6 +246,20 @@ function paintTile(ctx, type) {
         ctx.fillStyle = '#b2ebf2'; ctx.fillRect(54, 29, 6, 6);             // 砲口の発光
         ctx.fillStyle = '#80d8ff'; ctx.fillRect(30, 22, 4, 6);             // エネルギーコイル
         ctx.fillStyle = '#80d8ff'; ctx.fillRect(40, 22, 4, 6);
+    } else if (type === 'tank') {
+        // 戦車（横向きのシルエット：履帯＋車体＋砲塔＋長い砲身。オリーブドラブの軍用色）
+        ctx.fillStyle = '#2b3018'; ctx.fillRect(0, 0, 64, 64);               // 暗い地
+        ctx.fillStyle = '#1a1a1a'; ctx.fillRect(6, 44, 52, 12);             // 履帯（黒い帯）
+        ctx.fillStyle = '#3a3a3a';                                          // 履帯のリンク（点々）
+        for (let k = 8; k < 58; k += 6) ctx.fillRect(k, 46, 3, 8);
+        ctx.fillStyle = '#556b2f'; ctx.fillRect(8, 50, 8, 8);               // 起動輪/誘導輪
+        ctx.fillStyle = '#556b2f'; ctx.fillRect(48, 50, 8, 8);
+        ctx.fillStyle = '#4b5320'; ctx.fillRect(8, 32, 48, 14);            // 車体（ハル）
+        ctx.fillStyle = '#5a6b2a'; ctx.fillRect(22, 20, 22, 14);          // 砲塔
+        ctx.fillStyle = '#3e4718'; ctx.fillRect(42, 24, 22, 5);          // 砲身（前方へ突き出す）
+        ctx.fillStyle = '#2a2a2a'; ctx.fillRect(60, 24, 4, 5);          // マズルブレーキ
+        ctx.fillStyle = '#6b7d3a'; ctx.fillRect(26, 16, 5, 5);         // ハッチ/キューポラ
+        ctx.fillStyle = '#7a8a45'; ctx.fillRect(10, 33, 44, 2);       // ハイライト
     }
 }
 
@@ -282,6 +296,7 @@ let summonRedTexture;
 let summonBlueTexture;
 let rifleTexture;
 let railgunTexture;
+let tankTexture;
 
 function initMaterials() {
     const grassTop = createTexture('grass_top');
@@ -315,6 +330,7 @@ function initMaterials() {
     summonBlueTexture = createTexture('summon_blue');
     rifleTexture = createTexture('rifle');
     railgunTexture = createTexture('railgun');
+    tankTexture = createTexture('tank');
 
     materials[BLOCKS.GRASS] = [
         new THREE.MeshLambertMaterial({ map: grassSide }),

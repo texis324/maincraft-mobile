@@ -77,6 +77,7 @@ function pickBlock(screenX, screenY) {
 }
 
 function attemptMine(screenX, screenY) {
+    if (typeof inTank !== 'undefined' && inTank) return; // 搭乗中は採掘しない（左クリは砲撃へ＝main.jsで処理）
     const hit = pickBlock(screenX, screenY);
     if (!hit) return;
 
@@ -89,8 +90,20 @@ function attemptMine(screenX, screenY) {
 }
 
 function attemptPlaceOrIgnite(screenX, screenY) {
+    // 戦車に搭乗中はどのアイテムでも「砲撃」に固定（モバイルのタップ発砲もここを通る）。
+    if (typeof inTank !== 'undefined' && inTank) {
+        if (typeof fireTankShell === 'function') fireTankShell();
+        return;
+    }
+
     // Launcher Logic
     const currentItem = INVENTORY[selectedItemIndex];
+
+    // 戦車アイテム: 召喚して搭乗（搭乗中はガード済みなので非搭乗時の召喚/再搭乗）
+    if (currentItem === BLOCKS.TANK) {
+        if (typeof tankItemAction === 'function') tankItemAction();
+        return;
+    }
 
     if (currentItem === BLOCKS.TNT_LAUNCHER) {
         const dir = new THREE.Vector3();

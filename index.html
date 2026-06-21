@@ -25,6 +25,7 @@
         G: 空爆要請（上空から爆弾の雨）<br>
         🚀 核ミサイル/MIRV: ホイールかホットバーで選び右クリックで発射<br>
         🔫 ライフル: 右クリ/Cで連射（兵やモブを撃つ） / ⚡ レールガン: どんな山も貫くトンネルを穿つ<br>
+        🚜 戦車: ホットバー右端を選び右クリ(F)で召喚＆搭乗 → WASD走行・マウスで砲塔・クリックで砲撃・Fで降車<br>
         ポーズ(Esc)で描画距離・深さを変更→再生成（ワールドは無限）<br>
     </div>
 
@@ -33,6 +34,10 @@
     <div id="fly-mode-indicator">FLY MODE</div>
     <div id="radiation-display">☢ 被爆量: 0 mSv</div>
     <div id="break-indicator"></div>
+
+    <!-- 🚜 戦車 搭乗中 HUD -->
+    <div id="tank-hud">🚜 戦車搭乗中 — WASD:走行 / マウス:砲塔 / クリック:砲撃 / F:降りる</div>
+    <div id="btn-exit-tank">降りる (F)</div>
 
     <div id="hearts-container"></div>
 
@@ -134,6 +139,7 @@
     <script src="js/physics.js"></script>
     <script src="js/entities.js"></script>
     <script src="js/agents.js"></script>
+    <script src="js/tank.js"></script>
     <script src="js/ui.js"></script>
     <script src="js/player.js"></script>
     <script src="js/actions.js"></script>

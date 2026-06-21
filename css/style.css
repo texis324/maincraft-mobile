@@ -132,6 +132,56 @@ body { margin: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Ver
     white-space: nowrap;
 }
 
+/* 🚜 戦車 搭乗中 HUD（上部中央の操作ヒント） */
+#tank-hud {
+    display: none;
+    position: absolute;
+    top: calc(10px + env(safe-area-inset-top, 0px));
+    left: 50%;
+    transform: translateX(-50%);
+    color: #d7e08a;
+    background: rgba(20, 28, 8, 0.72);
+    border: 1px solid #4b5320;
+    padding: 6px 14px;
+    border-radius: 6px;
+    font-family: monospace;
+    font-size: 13px;
+    font-weight: bold;
+    pointer-events: none;
+    z-index: 6;
+    white-space: nowrap;
+    max-width: calc(100vw - 20px);
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* 🚜 降車ボタン（PC/モバイル共通・下部中央） */
+#btn-exit-tank {
+    display: none;
+    position: absolute;
+    bottom: calc(110px + env(safe-area-inset-bottom, 0px));
+    left: 50%;
+    transform: translateX(-50%);
+    color: #fff;
+    background: rgba(120, 40, 30, 0.85);
+    border: 2px solid #b71c1c;
+    padding: 10px 22px;
+    border-radius: 8px;
+    font-family: monospace;
+    font-size: 15px;
+    font-weight: bold;
+    pointer-events: auto;
+    cursor: pointer;
+    z-index: 30; /* look-zone(21)より上に＝モバイルでタップできる（埋もれると降車不能になる） */
+    -webkit-user-select: none;
+    user-select: none;
+    touch-action: manipulation;
+}
+#btn-exit-tank:active {
+    background: rgba(150, 55, 40, 0.95);
+    transform: translateX(-50%) scale(0.96);
+}
+
 /* Screens */
 .overlay-screen {
     display: none;

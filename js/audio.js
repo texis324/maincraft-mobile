@@ -199,6 +199,33 @@ function playSound(type, materialType) {
         return;
     }
 
+    if (type === 'tank_fire') {
+        // 戦車主砲: 鋭い発射クラック ＋ 太く短い重低音の砲撃ドカン（gunshotより重くnukeより軽い）。
+        if (now - lastGunshotTime < 0.05) return;
+        lastGunshotTime = now;
+        // 発射の破裂（バンドパスノイズ）
+        const crack = audioCtx.createBufferSource();
+        crack.buffer = noiseBuffer;
+        const cf = audioCtx.createBiquadFilter();
+        cf.type = 'bandpass'; cf.frequency.value = 600;
+        const cg = audioCtx.createGain();
+        cg.gain.setValueAtTime(0.45, now);
+        cg.gain.exponentialRampToValueAtTime(0.01, now + 0.25);
+        crack.connect(cf); cf.connect(cg); cg.connect(masterGain);
+        crack.start(); crack.stop(now + 0.25);
+        // 砲撃の芯（パンチのある重低音サブ）
+        const sub = audioCtx.createOscillator();
+        sub.type = 'triangle';
+        sub.frequency.setValueAtTime(150, now);
+        sub.frequency.exponentialRampToValueAtTime(38, now + 0.3);
+        const sg = audioCtx.createGain();
+        sg.gain.setValueAtTime(0.5, now);
+        sg.gain.exponentialRampToValueAtTime(0.01, now + 0.35);
+        sub.connect(sg); sg.connect(masterGain);
+        sub.start(); sub.stop(now + 0.35);
+        return;
+    }
+
     if (type === 'railgun') {
         // レールガン: 高速チャージ上昇トーン → 鋭い放電クラック → 余韻。重い一撃感。
         const dur = 0.5;

@@ -14,6 +14,7 @@ function getImageForType(type) {
     else if(type === BLOCKS.SUMMON_BLUE) return summonBlueTexture.image.toDataURL();
     else if(type === BLOCKS.RIFLE) return rifleTexture.image.toDataURL();
     else if(type === BLOCKS.RAILGUN) return railgunTexture.image.toDataURL();
+    else if(type === BLOCKS.TANK) return tankTexture.image.toDataURL();
     else if(type === BLOCKS.WATER) return materials[type].map.image.toDataURL();
     else if(type === BLOCKS.FLINT) return flintTexture.image.toDataURL();
     else if(type === BLOCKS.TNT_LAUNCHER) return launcherTexture.image.toDataURL();

@@ -80,6 +80,10 @@ function animate() {
     flushDirtyChunks(dirtyChunks.size > MESH_CATCHUP_AT ? MESH_CATCHUP : MESH_BUDGET);
 
     // Game Logic
+    // 戦車搭乗中: マウス押しっぱで主砲を連射（クールダウンは fireTankShell 内で管理）。採掘/設置はしない。
+    if (typeof inTank !== 'undefined' && inTank) {
+        if (isLeftMouseDown || isRightMouseDown) fireTankShell();
+    } else {
     if (isLeftMouseDown && time - lastActionTime > getBreakDelay()) {
         attemptMine();
         lastActionTime = time;
@@ -107,6 +111,7 @@ function animate() {
             lastActionTime = time;
         }
     }
+    } // /戦車搭乗ガード
 
     updateParticles(delta);
     updateMushroom(delta); // 原爆のキノコ雲を更新
@@ -115,7 +120,14 @@ function animate() {
     updateNukeMissiles(delta); // 核ミサイル（単弾頭/MIRV）の飛行・分裂・着弾を更新
     updateRailBeams(delta); // レールガンのビーム演出をフェード
     updateAgents(delta); // AI陣営戦の移動・射撃（InstancedMesh・ラウンドロビン思考・曳光弾）
+    updateTanks(delta); // 🚜 戦車（搭乗運転＋砲弾）の更新
     updateGunAnimation(delta); // 銃のアニメーション更新
+
+    // 戦車搭乗中はプレイヤーの徒歩物理をスキップ（カメラは updateTanks がチェイス位置へ設定済み）。
+    if (typeof inTank !== 'undefined' && inTank) {
+        renderer.render(scene, camera);
+        return;
+    }
 
     // Physics & Movement
     // Apply Friction
